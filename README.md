@@ -49,7 +49,8 @@
 
 ## 计划中的主要功能
 
-- [ ] FFmpeg / FFprobe 路径设置与能力检测
+- [ ] FFmpeg / FFprobe 安装检测（PATH → 安装目录 `bin` → 指定路径）与能力检测
+- [ ] 应用内下载 FFmpeg（M6）
 - [ ] 视频、音频、字幕流信息展示
 - [ ] x264、x265 与可用 NVENC 编码器
 - [ ] CRF / CQ、preset、像素格式等参数配置
