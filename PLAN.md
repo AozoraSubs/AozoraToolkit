@@ -13,7 +13,7 @@
 
 - [x] **M0：项目骨架** — 项目可开发、可检查、可构建（详见下方完成记录）
 - [x] **M1：媒体探测** — FFmpeg/FFprobe 能力检测与媒体流展示（详见下方完成记录）
-- [ ] **M2：单任务压制** — 参数生成、编码进程、进度、取消和输出收尾
+- [x] **M2：单任务压制** — 参数生成、编码进程、进度、取消和输出收尾（详见下方完成记录）
 - [ ] **M3：预设与队列** — 预设持久化、队列、重试和历史
 - [ ] **M4：动画压制增强** — 音轨、字幕、章节和 MKV 行为
 - [ ] **M5：发布准备** — 许可证、安装包、诊断和干净环境验证
@@ -46,18 +46,18 @@
 
 ### M2：单任务压制
 
-- [ ] 定义并验证结构化编码配置
-- [ ] 实现 x264 / x265 编码参数生成（仅在工具支持时）
-- [ ] 实现可用 NVENC 编码器参数生成
-- [ ] 实现输出路径、文件覆盖和输入输出冲突检查
-- [ ] 生成安全的 FFmpeg 参数数组，不拼接 Shell 命令
-- [ ] 实现 FFmpeg 子进程启动与 stdout / stderr 持续读取
-- [ ] 使用机器可读进度接口解析进度
-- [ ] 显示进度、速度、已用时间、可用时的 ETA 和日志
-- [ ] 实现任务取消和进程清理
-- [ ] 实现临时输出、成功收尾和失败清理策略
-- [ ] 验证成功、失败、取消三种路径
-- [ ] 验证非 ASCII 路径、空格和特殊字符路径
+- [x] 定义并验证结构化编码配置
+- [x] 实现 x264 / x265 编码参数生成（仅在工具支持时）
+- [x] 实现可用 NVENC 编码器参数生成
+- [x] 实现输出路径、文件覆盖和输入输出冲突检查
+- [x] 生成安全的 FFmpeg 参数数组，不拼接 Shell 命令
+- [x] 实现 FFmpeg 子进程启动与 stdout / stderr 持续读取
+- [x] 使用机器可读进度接口解析进度
+- [x] 显示进度、速度、已用时间、可用时的 ETA 和日志
+- [x] 实现任务取消和进程清理
+- [x] 实现临时输出、成功收尾和失败清理策略
+- [x] 验证成功、失败、取消三种路径
+- [x] 验证非 ASCII 路径、空格和特殊字符路径
 
 ### M3：预设与队列
 
@@ -172,6 +172,19 @@
 - **限制：** 文件选择对话框、拖放与信息表格的**人工交互验证**需在安装版或正常终端中进行（本会话工作区进程受限，仅能验证到窗口稳定运行层）；数据层已由实机测试覆盖。
 - **PLAN 更新：** M1 全部 10 项勾选；§11 M1 子项勾选；实施进度总览 M1 勾选；README M1 功能清单勾选。
 - **剩余工作：** 进入 M2（单任务压制）：结构化编码配置、参数生成、FFmpeg 进程/进度/取消与输出收尾。
+
+### 2026-10-10（M2）：单任务压制
+
+- **本次完成：** M2 全部 12 项——结构化编码配置（`schemaVersion: 1` 的 `EncodeConfig`：编码器 / 质量模式 / 质量值 / 预设 / 像素格式，逐编码器规格校验范围）；x264/x265 与 NVENC 参数生成（`planner::build_args`：`-hide_banner -nostdin -y -i` → `-map 0:v:0 -c:v … -preset … -crf/-cq … [-pix_fmt …]` → `-map 0:a? -c:a copy -sn` → `-progress pipe:1 -nostats`，全程参数数组 `OsString`，无 Shell 拼接）；输出路径/覆盖/输入输出冲突检查（扩展名 mkv/mp4、父目录存在、规范化路径防输入输出同一文件、覆盖策略）；FFmpeg 子进程运行器（tokio：stdout 进度 + stderr 日志持续读取、`kill_on_drop`、退出后收尾）；机器可读进度解析（`-progress pipe:1` 键值块，兼容 `out_time_ms/out_time_us/out_time`，速度解析，ETA 计算，250ms 节流）；临时输出策略（同目录 `<stem>.aozora-part-<任务ID>.<ext>`，成功重命名、失败/取消清理，覆盖时先移除旧文件）；取消（`watch` 信号 → `start_kill`，最终状态 `Cancelled`）；前端压制页（编码器下拉按能力检测动态禁用、CRF/CQ 数值与范围提示、预设、像素格式、输出路径 + 保存对话框、覆盖勾选、参数预览、进度条/速度/已用时间/ETA/日志、取消按钮、完成/失败/取消结果与错误）；任务命令层（`start_job`/`cancel_job`/`preview_job_args`，单任务限制，`job:started/progress/log/finished` 事件，事件转发完成后才发 finished 保证顺序）。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace` 全部通过。
+  - 实机集成测试（ignored，本机 ffmpeg 9.0，9/9 通过）：成功路径（libx264 完成压制 + 临时文件重命名 + 输出可被 FFprobe 读取 + 进度 100%）；失败路径（输入不存在 → Failed + 临时文件清理 + 无伪成品）；取消路径（veryslow 长编码中途取消 → Cancelled + 进程终止 + 清理）；覆盖路径（旧输出被替换）；非 ASCII/空格/括号路径（`测试 目录 (1)\样片 [demo].mkv` 全程正常）；NVENC 参数（h264_nvenc p1/p7、hevc_nvenc p5、av1_nvenc p5 + CQ 21 均真实编码成功——本机具备 NVIDIA GPU）。
+  - 前端：`pnpm run check`、`pnpm run lint`、`pnpm run format:check`、`pnpm test`（8/8）、`pnpm build` 全部通过。
+  - `pnpm tauri dev` 冒烟：窗口启动、标题 "Aozora Encode"、WebView2 正常初始化（本会话可见进程与窗口标题）。
+- **工程问题与修复（Windows-GNU 特有，已入库）：** 应用一旦使用事件（`app.emit`）与 tauri 默认特性 `common-controls-v6`，测试可执行文件会导入 `TaskDialogIndirect`（仅 comctl32 v6 导出）与 `WebView2Loader.dll`。修复：build.rs 改为 tauri-build 不内嵌清单（`new_without_app_manifest`），GNU 工具链下用 windres 生成 `default-manifest.o`（v6 清单）并经 `-B` 覆盖 gcc specs 的 `if-exists(default-manifest.o)` 注入，MSVC 下走 `embed-resource` 资源清单；同时把 `WebView2Loader.dll` 复制到 `deps/`。新增 `tests/smoke.rs` 断言测试 exe 内嵌 v6 清单。
+- **限制：** 编码页表单交互（下拉选择、进度条动画、日志滚动）未在本会话人工点击验证（数据层与窗口启动已实测）；NVENC 真实验证依赖 NVIDIA GPU（本机具备）；版本号未变更（按规则需用户明确要求）。
+- **PLAN 更新：** M2 全部 12 项勾选；§11 M2 子项勾选；实施进度总览 M2 勾选；README M2 清单勾选。
+- **剩余工作：** 进入 M3（预设与队列）：预设 JSON 持久化/导入导出、队列与任务历史、命令预览与复制。
 
 ---
 
@@ -687,12 +700,12 @@ SQLite。第一版没有必要仅为了"专业架构"而先引入数据库。
 
 ### M2：单任务压制
 
--   [ ] 实现 H.264、HEVC 和可用的 NVENC 编码器配置。
--   [ ] 生成参数数组。
--   [ ] 启动 FFmpeg，解析进度，显示日志。
--   [ ] 支持取消和输出收尾。
+-   [x] 实现 H.264、HEVC 和可用的 NVENC 编码器配置。
+-   [x] 生成参数数组。
+-   [x] 启动 FFmpeg，解析进度，显示日志。
+-   [x] 支持取消和输出收尾。
 
-**完成标准：** 可可靠完成、取消和诊断一个压制任务。
+**完成标准：** 可可靠完成、取消和诊断一个压制任务。已完成（成功/失败/取消/覆盖/非 ASCII 路径/NVENC 参数均经真实 FFmpeg 集成测试验证）。
 
 ### M3：预设与队列
 

@@ -58,10 +58,10 @@
 
 ### M2 单任务压制
 
-- [ ] x264、x265 与可用 NVENC 编码器
-- [ ] CRF / CQ、preset、像素格式等参数配置
-- [ ] 输出路径和容器配置
-- [ ] 任务队列、进度、日志与取消
+- [x] x264、x265 与可用 NVENC 编码器
+- [x] CRF / CQ、preset、像素格式等参数配置
+- [x] 输出路径和容器配置（MKV / MP4）
+- [x] 单任务压制：进度、速度、ETA、日志与取消
 
 ### M3 预设与队列
 
@@ -88,7 +88,7 @@
 - Tauri 2 所需的系统构建依赖
 - FFmpeg / FFprobe（开发期间可使用本机安装版本）
 
-Windows 构建说明：推荐安装 MSVC Build Tools（含 C++ 桌面开发负载）。若使用 GNU 工具链（`x86_64-pc-windows-gnu`），需要额外把 mingw-w64 binutils（`dlltool`、`ar` 等）加入 `PATH`，因为部分依赖的构建脚本会直接调用 `dlltool`；项目已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器的导出序号上限问题。
+Windows 构建说明：推荐安装 MSVC Build Tools（含 C++ 桌面开发负载）。若使用 GNU 工具链（`x86_64-pc-windows-gnu`），需要额外把 mingw-w64 binutils（`dlltool`、`ar`、`windres` 等）加入 `PATH`，因为部分依赖的构建脚本会直接调用 `dlltool`，且 build.rs 会用 `windres` 生成应用清单；项目已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器的导出序号上限问题。
 
 ## 本地开发
 
@@ -115,7 +115,8 @@ Rust 检查（在 `src-tauri` 目录；纯逻辑与测试位于 workspace 成员
 ```bash
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo test --workspace
+cargo test -p aozora-core -- --ignored   # 需要本机 ffmpeg/ffprobe；NVENC 用例另需 NVIDIA GPU
 ```
 
 打包验证（产出 Windows MSI 安装包，`bundle.targets` 仅保留 `msi`）：
