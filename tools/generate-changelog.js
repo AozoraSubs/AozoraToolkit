@@ -1,37 +1,37 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
+const changelogPath = path.join(__dirname, "..", "CHANGELOG.md");
 
 // 分类映射
 const typeMap = {
-  feat: '新增 | New',
-  fix: '修复 | Fix',
-  refactor: '改进 | Improved',
-  perf: '改进 | Improved',
-  rft: '改进 | Improved',
-  docs: '文档 | Docs',
-  doc: '文档 | Docs',
-  style: '其他 | Other',
-  build: '其他 | Other',
-  ci: '自动化 | CI',
-  test: '其他 | Other',
-  chore: '其他 | Other',
+  feat: "新增 | New",
+  fix: "修复 | Fix",
+  refactor: "改进 | Improved",
+  perf: "改进 | Improved",
+  rft: "改进 | Improved",
+  docs: "文档 | Docs",
+  doc: "文档 | Docs",
+  style: "其他 | Other",
+  build: "其他 | Other",
+  ci: "自动化 | CI",
+  test: "其他 | Other",
+  chore: "其他 | Other",
 };
 
 // 中文关键词映射
 const chineseKeywords = {
-  '新增': '新增 | New',
-  '修复': '修复 | Fix',
-  '更新': '改进 | Improved',
-  '改进': '改进 | Improved',
-  '优化': '改进 | Improved',
-  '重构': '改进 | Improved',
-  '文档': '文档 | Docs',
+  新增: "新增 | New",
+  修复: "修复 | Fix",
+  更新: "改进 | Improved",
+  改进: "改进 | Improved",
+  优化: "改进 | Improved",
+  重构: "改进 | Improved",
+  文档: "文档 | Docs",
 };
 
 // 忽略的前缀
@@ -47,17 +47,17 @@ function parseArgs() {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--tag' || arg === '-t') {
+    if (arg === "--tag" || arg === "-t") {
       tagName = args[++i];
-    } else if (arg === '--base' || arg === '--latest' || arg === '-b') {
+    } else if (arg === "--base" || arg === "--latest" || arg === "-b") {
       latest = args[++i];
-    } else if (arg === '-wh' || arg === '--with-hash') {
+    } else if (arg === "-wh" || arg === "--with-hash") {
       withHash = true;
-    } else if (arg === '-wc' || arg === '--with-commitizen') {
+    } else if (arg === "-wc" || arg === "--with-commitizen") {
       withCommitizen = true;
-    } else if (arg === '--output-only') {
+    } else if (arg === "--output-only") {
       outputOnly = true;
-    } else if (arg === '--help' || arg === '-h') {
+    } else if (arg === "--help" || arg === "-h") {
       console.log(`
 用法: node generate-changelog.js [选项]
 
@@ -78,12 +78,18 @@ function parseArgs() {
 
 function callCommand(command) {
   try {
-    return execSync(command, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-  } catch (e) {
+    return execSync(command, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch {
     try {
-      return execSync(command, { encoding: 'gbk', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+      return execSync(command, {
+        encoding: "gbk",
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
     } catch {
-      return '';
+      return "";
     }
   }
 }
@@ -111,10 +117,10 @@ function parseCategory(message) {
   }
 
   // 检查 commitizen 前缀
-  const m = message.match(/^(?<prefix>\w+)(?:\([\w\-]+\))?:\s*/);
+  const m = message.match(/^(?<prefix>\w+)(?:\([\w-]+\))?:\s*/);
   if (m) {
     const prefix = m.groups.prefix.toLowerCase();
-    return typeMap[prefix] || '其他 | Other';
+    return typeMap[prefix] || "其他 | Other";
   }
 
   // 检查中文关键词
@@ -124,7 +130,7 @@ function parseCategory(message) {
     }
   }
 
-  return '其他 | Other';
+  return "其他 | Other";
 }
 
 function getCommits(latest = null) {
@@ -139,7 +145,7 @@ function getCommits(latest = null) {
   if (!output) return [];
 
   const commits = [];
-  const lines = output.split('\n');
+  const lines = output.split("\n");
 
   for (let i = 0; i < lines.length; i += 3) {
     if (i + 2 >= lines.length) break;
@@ -155,18 +161,18 @@ function getCommits(latest = null) {
 
 function classifyCommits(commits, withCommitizen = false) {
   const result = {
-    '新增 | New': [],
-    '修复 | Fix': [],
-    '改进 | Improved': [],
-    '文档 | Docs': [],
-    '其他 | Other': [],
-    '自动化 | CI': [],
+    "新增 | New": [],
+    "修复 | Fix": [],
+    "改进 | Improved": [],
+    "文档 | Docs": [],
+    "其他 | Other": [],
+    "自动化 | CI": [],
   };
 
   const contributors = new Set();
 
   for (const commit of commits) {
-    if (commit.message.includes('[skip changelog]')) continue;
+    if (commit.message.includes("[skip changelog]")) continue;
 
     // 忽略 CI 自动提交的版本更新提交
     if (commit.message.match(/^chore:\s*update\s+version\s+to\s+.+/i)) continue;
@@ -178,11 +184,11 @@ function classifyCommits(commits, withCommitizen = false) {
 
     // 剥掉 commitizen 前缀
     if (!withCommitizen) {
-      message = message.replace(/^(?<prefix>\w+)(?:\([\w\-]+\))?:\s*/, '');
+      message = message.replace(/^(?<prefix>\w+)(?:\([\w-]+\))?:\s*/, "");
     }
 
     // 添加贡献者
-    if (commit.author && commit.author !== 'web-flow') {
+    if (commit.author && commit.author !== "web-flow") {
       contributors.add(commit.author);
     }
 
@@ -198,24 +204,24 @@ function classifyCommits(commits, withCommitizen = false) {
 
 function getGitHubRepoUrl() {
   try {
-    const remoteUrl = callCommand('git remote get-url origin');
+    const remoteUrl = callCommand("git remote get-url origin");
     if (!remoteUrl) return null;
 
     // 转换 git@github.com:owner/repo.git 或 https://github.com/owner/repo.git 格式
     let repoPath = remoteUrl;
-    if (repoPath.startsWith('git@')) {
-      repoPath = repoPath.replace('git@github.com:', 'https://github.com/');
+    if (repoPath.startsWith("git@")) {
+      repoPath = repoPath.replace("git@github.com:", "https://github.com/");
     }
-    repoPath = repoPath.replace('.git', '');
+    repoPath = repoPath.replace(".git", "");
     return repoPath;
   } catch {
     return null;
   }
 }
 
-function generateMd(classifiedData, tagName, latest, withHash = false) {
-  const { categories, contributors } = classifiedData;
-  const now = new Date().toLocaleDateString('zh-CN');
+function generateMd(classifiedData, tagName, latest, _withHash = false) {
+  const { categories } = classifiedData;
+  const now = new Date().toLocaleDateString("zh-CN");
   const lines = [];
   const repoUrl = getGitHubRepoUrl();
 
@@ -227,20 +233,29 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
   }
 
   if (latest && repoUrl) {
-    const endTag = tagName || 'HEAD';
-    lines.push(`> [${latest}...${endTag}](${repoUrl}/compare/${latest}...${endTag})`);
+    const endTag = tagName || "HEAD";
+    lines.push(
+      `> [${latest}...${endTag}](${repoUrl}/compare/${latest}...${endTag})`,
+    );
   } else if (latest) {
     lines.push(`> ${latest} ... HEAD`);
   }
-  lines.push('');
+  lines.push("");
 
   // 按分类顺序输出
-  const order = ['新增 | New', '修复 | Fix', '改进 | Improved', '文档 | Docs', '自动化 | CI', '其他 | Other'];
+  const order = [
+    "新增 | New",
+    "修复 | Fix",
+    "改进 | Improved",
+    "文档 | Docs",
+    "自动化 | CI",
+    "其他 | Other",
+  ];
   for (const category of order) {
     if (categories[category].length === 0) continue;
 
     lines.push(`### ${category}`);
-    lines.push('');
+    lines.push("");
 
     for (const item of categories[category]) {
       let line = `* ${item.message}`;
@@ -250,7 +265,7 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
         line += ` (${item.hash})`;
       }*/
       // 添加提交者信息
-      if (item.author && item.author !== 'web-flow') {
+      if (item.author && item.author !== "web-flow") {
         if (repoUrl) {
           line += ` @${item.author}`;
         } else {
@@ -260,17 +275,17 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
       lines.push(line);
     }
 
-    lines.push('');
+    lines.push("");
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function writeToFile(content, append = false) {
   if (append) {
-    fs.appendFileSync(changelogPath, '\n' + content, 'utf8');
+    fs.appendFileSync(changelogPath, "\n" + content, "utf8");
   } else {
-    fs.writeFileSync(changelogPath, content, 'utf8');
+    fs.writeFileSync(changelogPath, content, "utf8");
   }
 }
 
@@ -281,34 +296,39 @@ function main() {
   const resolvedTagName = tagName || getCurrentTag();
 
   if (!outputOnly) {
-    console.log('📊 正在生成变更日志...');
+    console.log("📊 正在生成变更日志...");
     if (resolvedLatest) {
       console.log(`📌 从: ${resolvedLatest}`);
     }
     if (resolvedTagName) {
       console.log(`🏷️  到: ${resolvedTagName}`);
     }
-    console.log('');
+    console.log("");
   }
 
   const commits = getCommits(resolvedLatest);
   if (commits.length === 0) {
     if (!outputOnly) {
-      console.log('⚠️  没有找到提交记录');
+      console.log("⚠️  没有找到提交记录");
     }
     return;
   }
 
   const grouped = classifyCommits(commits, withCommitizen);
-  const markdown = generateMd(grouped, resolvedTagName, resolvedLatest, withHash);
+  const markdown = generateMd(
+    grouped,
+    resolvedTagName,
+    resolvedLatest,
+    withHash,
+  );
 
   writeToFile(markdown, !!resolvedLatest);
 
   if (outputOnly) {
     console.log(markdown);
   } else {
-    console.log('✅ 变更日志已更新: CHANGELOG.md');
-    console.log('\n' + markdown);
+    console.log("✅ 变更日志已更新: CHANGELOG.md");
+    console.log("\n" + markdown);
   }
 }
 

@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号 (例如: v1.0.0)'
+        description: "版本号 (例如: v1.0.0)"
         required: true
         type: string
       base_tag:
-        description: '基础标签 (可选，默认为上一个标签)'
+        description: "基础标签 (可选，默认为上一个标签)"
         required: false
         type: string
 
@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Get base tag and check commits
         id: check
@@ -122,7 +122,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Resolve base tag
         id: base-tag

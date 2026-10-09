@@ -3,12 +3,12 @@ name: Weekly Snapshot Release
 on:
   # 每周一 UTC 时间 00:00 自动执行
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
   # 手动触发
   workflow_dispatch:
     inputs:
       base_tag:
-        description: '基础标签（可选，默认为最近的正式 release）'
+        description: "基础标签（可选，默认为最近的正式 release）"
         required: false
         type: string
 
@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Generate snapshot version
         id: version

@@ -13,10 +13,10 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: '要构建的 Git 引用；留空使用触发提交'
+        description: "要构建的 Git 引用；留空使用触发提交"
         required: false
         type: string
-        default: ''
+        default: ""
 
 permissions:
   contents: read
