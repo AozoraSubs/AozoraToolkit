@@ -5,11 +5,11 @@
   </header>
 
   <div class="placeholder">
-    <strong>即将实现（M2 / M3）</strong>
+    <strong>即将实现（M3）</strong>
     <ul>
       <li>任务队列与状态展示</li>
-      <li>进度、速度与耗时</li>
       <li>失败日志与重试</li>
+      <li>任务历史</li>
       <li>完成后打开输出目录</li>
     </ul>
   </div>
