@@ -540,10 +540,14 @@ JSON。执行前需要验证和转换。
 
 ## 8. 数据和文件布局
 
-建议把应用状态和用户可见预设放在应用数据目录，而不是安装目录。
+应用状态和用户可见预设放在系统**应用配置目录**（Tauri `app_config_dir()`，按应用标识 `com.aozora.encode` 生成），而不是安装目录。各平台根目录（已决策）：
+
+- Windows：`%APPDATA%\com.aozora.encode`（Roaming，即 `C:\Users\<用户>\AppData\Roaming\com.aozora.encode`）
+- macOS：`~/Library/Application Support/com.aozora.encode`
+- Linux：`$XDG_CONFIG_HOME/com.aozora.encode`（未设置时默认 `~/.config/com.aozora.encode`）
 
 ``` text
-AppData/
+<配置根目录>/
   settings.json
   presets/
     h264-compatible.json
