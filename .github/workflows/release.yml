@@ -108,7 +108,7 @@ jobs:
 
   # 第三步：构建全部通过后创建 tag 与 Release，并附带构建产物
   create-release:
-    needs: build
+    needs: [build, bump-version]
     runs-on: ubuntu-latest
     permissions:
       contents: write

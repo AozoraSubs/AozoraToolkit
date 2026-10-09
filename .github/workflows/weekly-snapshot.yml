@@ -84,7 +84,7 @@ jobs:
 
   # 第三步：构建全部通过后创建快照 Pre-release 并附带产物
   weekly-snapshot:
-    needs: build
+    needs: [build, snapshot-version]
     runs-on: ubuntu-latest
     permissions:
       contents: write
