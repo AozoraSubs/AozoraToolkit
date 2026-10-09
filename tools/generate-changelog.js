@@ -7,33 +7,34 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
 
-// 鍒嗙被鏄犲皠
+// 分类映射
 const typeMap = {
-  feat: '鏂板 | New',
-  fix: '淇 | Fix',
-  refactor: '鏀硅繘 | Improved',
-  perf: '鏀硅繘 | Improved',
-  rft: '鏀硅繘 | Improved',
-  docs: '鏂囨。 | Docs',
-  doc: '鏂囨。 | Docs',
-  style: '鍏朵粬 | Other',
-  build: '鍏朵粬 | Other',
-  ci: '鑷姩鍖?| CI',
-  test: '鍏朵粬 | Other',
-  chore: '鍏朵粬 | Other',
+  feat: '新增 | New',
+  fix: '修复 | Fix',
+  refactor: '改进 | Improved',
+  perf: '改进 | Improved',
+  rft: '改进 | Improved',
+  docs: '文档 | Docs',
+  doc: '文档 | Docs',
+  style: '其他 | Other',
+  build: '其他 | Other',
+  ci: '自动化 | CI',
+  test: '其他 | Other',
+  chore: '其他 | Other',
 };
 
-// 涓枃鍏抽敭璇嶆槧灏?const chineseKeywords = {
-  '鏂板': '鏂板 | New',
-  '淇': '淇 | Fix',
-  '鏇存柊': '鏀硅繘 | Improved',
-  '鏀硅繘': '鏀硅繘 | Improved',
-  '浼樺寲': '鏀硅繘 | Improved',
-  '閲嶆瀯': '鏀硅繘 | Improved',
-  '鏂囨。': '鏂囨。 | Docs',
+// 中文关键词映射
+const chineseKeywords = {
+  '新增': '新增 | New',
+  '修复': '修复 | Fix',
+  '更新': '改进 | Improved',
+  '改进': '改进 | Improved',
+  '优化': '改进 | Improved',
+  '重构': '改进 | Improved',
+  '文档': '文档 | Docs',
 };
 
-// 蹇界暐鐨勫墠缂€
+// 忽略的前缀
 const IGNORE_PREFIXES = /^(?:build|style|debug)\s*(?:\([^)]*\))*:\s*/;
 
 function parseArgs() {
@@ -58,14 +59,15 @@ function parseArgs() {
       outputOnly = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
-鐢ㄦ硶: node generate-changelog.js [閫夐」]
+用法: node generate-changelog.js [选项]
 
-閫夐」:
-  --tag, -t <鏍囩>      鎸囧畾鍙戝竷鏍囩鍚嶇О
-  --base, --latest, -b <鏍囩>  鎸囧畾鍩虹鏍囩
-  -wh, --with-hash      鏄剧ず鎻愪氦鍝堝笇
-  -wc, --with-commitizen  淇濈暀 commitizen 鍓嶇紑
-  --output-only         浠呰緭鍑?changelog 鍐呭锛堢敤浜?CI/CD锛?  -h, --help            鏄剧ず甯姪淇℃伅
+选项:
+  --tag, -t <标签>      指定发布标签名称
+  --base, --latest, -b <标签>  指定基础标签
+  -wh, --with-hash      显示提交哈希
+  -wc, --with-commitizen  保留 commitizen 前缀
+  --output-only         仅输出 changelog 内容（用于 CI/CD）
+  -h, --help            显示帮助信息
       `);
       process.exit(0);
     }
@@ -103,26 +105,26 @@ function getCurrentTag() {
 }
 
 function parseCategory(message) {
-  // 妫€鏌ュ拷鐣ュ墠缂€
+  // 检查忽略前缀
   if (IGNORE_PREFIXES.test(message)) {
     return null;
   }
 
-  // 妫€鏌?commitizen 鍓嶇紑
+  // 检查 commitizen 前缀
   const m = message.match(/^(?<prefix>\w+)(?:\([\w\-]+\))?:\s*/);
   if (m) {
     const prefix = m.groups.prefix.toLowerCase();
-    return typeMap[prefix] || '鍏朵粬 | Other';
+    return typeMap[prefix] || '其他 | Other';
   }
 
-  // 妫€鏌ヤ腑鏂囧叧閿瘝
+  // 检查中文关键词
   for (const [keyword, category] of Object.entries(chineseKeywords)) {
     if (message.includes(keyword)) {
       return category;
     }
   }
 
-  return '鍏朵粬 | Other';
+  return '其他 | Other';
 }
 
 function getCommits(latest = null) {
@@ -153,12 +155,12 @@ function getCommits(latest = null) {
 
 function classifyCommits(commits, withCommitizen = false) {
   const result = {
-    '鏂板 | New': [],
-    '淇 | Fix': [],
-    '鏀硅繘 | Improved': [],
-    '鏂囨。 | Docs': [],
-    '鍏朵粬 | Other': [],
-    '鑷姩鍖?| CI': [],
+    '新增 | New': [],
+    '修复 | Fix': [],
+    '改进 | Improved': [],
+    '文档 | Docs': [],
+    '其他 | Other': [],
+    '自动化 | CI': [],
   };
 
   const contributors = new Set();
@@ -166,19 +168,21 @@ function classifyCommits(commits, withCommitizen = false) {
   for (const commit of commits) {
     if (commit.message.includes('[skip changelog]')) continue;
 
-    // 蹇界暐 CI 鑷姩鎻愪氦鐨勭増鏈洿鏂版彁浜?    if (commit.message.match(/^chore:\s*update\s+version\s+to\s+.+/i)) continue;
+    // 忽略 CI 自动提交的版本更新提交
+    if (commit.message.match(/^chore:\s*update\s+version\s+to\s+.+/i)) continue;
 
     const category = parseCategory(commit.message);
     if (!category) continue;
 
     let message = commit.message;
 
-    // 鍓ユ帀 commitizen 鍓嶇紑
+    // 剥掉 commitizen 前缀
     if (!withCommitizen) {
       message = message.replace(/^(?<prefix>\w+)(?:\([\w\-]+\))?:\s*/, '');
     }
 
-    // 娣诲姞璐＄尞鑰?    if (commit.author && commit.author !== 'web-flow') {
+    // 添加贡献者
+    if (commit.author && commit.author !== 'web-flow') {
       contributors.add(commit.author);
     }
 
@@ -197,7 +201,7 @@ function getGitHubRepoUrl() {
     const remoteUrl = callCommand('git remote get-url origin');
     if (!remoteUrl) return null;
 
-    // 杞崲 git@github.com:owner/repo.git 鎴?https://github.com/owner/repo.git 鏍煎紡
+    // 转换 git@github.com:owner/repo.git 或 https://github.com/owner/repo.git 格式
     let repoPath = remoteUrl;
     if (repoPath.startsWith('git@')) {
       repoPath = repoPath.replace('git@github.com:', 'https://github.com/');
@@ -215,11 +219,11 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
   const lines = [];
   const repoUrl = getGitHubRepoUrl();
 
-  // 鏍囬
+  // 标题
   if (tagName) {
     lines.push(`## ${tagName}`);
   } else {
-    lines.push(`## 馃摑 鏇存柊鏃ュ織 (${now})`);
+    lines.push(`## 📝 更新日志 (${now})`);
   }
 
   if (latest && repoUrl) {
@@ -230,7 +234,8 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
   }
   lines.push('');
 
-  // 鎸夊垎绫婚『搴忚緭鍑?  const order = ['鏂板 | New', '淇 | Fix', '鏀硅繘 | Improved', '鏂囨。 | Docs', '鑷姩鍖?| CI', '鍏朵粬 | Other'];
+  // 按分类顺序输出
+  const order = ['新增 | New', '修复 | Fix', '改进 | Improved', '文档 | Docs', '自动化 | CI', '其他 | Other'];
   for (const category of order) {
     if (categories[category].length === 0) continue;
 
@@ -244,7 +249,8 @@ function generateMd(classifiedData, tagName, latest, withHash = false) {
       } else if (withHash) {
         line += ` (${item.hash})`;
       }*/
-      // 娣诲姞鎻愪氦鑰呬俊鎭?      if (item.author && item.author !== 'web-flow') {
+      // 添加提交者信息
+      if (item.author && item.author !== 'web-flow') {
         if (repoUrl) {
           line += ` @${item.author}`;
         } else {
@@ -275,12 +281,12 @@ function main() {
   const resolvedTagName = tagName || getCurrentTag();
 
   if (!outputOnly) {
-    console.log('馃搳 姝ｅ湪鐢熸垚鍙樻洿鏃ュ織...');
+    console.log('📊 正在生成变更日志...');
     if (resolvedLatest) {
-      console.log(`馃搶 浠? ${resolvedLatest}`);
+      console.log(`📌 从: ${resolvedLatest}`);
     }
     if (resolvedTagName) {
-      console.log(`馃彿锔? 鍒? ${resolvedTagName}`);
+      console.log(`🏷️  到: ${resolvedTagName}`);
     }
     console.log('');
   }
@@ -288,7 +294,7 @@ function main() {
   const commits = getCommits(resolvedLatest);
   if (commits.length === 0) {
     if (!outputOnly) {
-      console.log('鈿狅笍  娌℃湁鎵惧埌鎻愪氦璁板綍');
+      console.log('⚠️  没有找到提交记录');
     }
     return;
   }
@@ -301,7 +307,7 @@ function main() {
   if (outputOnly) {
     console.log(markdown);
   } else {
-    console.log('鉁?鍙樻洿鏃ュ織宸叉洿鏂? CHANGELOG.md');
+    console.log('✅ 变更日志已更新: CHANGELOG.md');
     console.log('\n' + markdown);
   }
 }

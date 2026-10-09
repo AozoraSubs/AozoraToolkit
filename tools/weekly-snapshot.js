@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /**
- * 鎵ц鍛戒护骞惰繑鍥炵粨鏋滐紝闈欓粯澶勭悊閿欒
+ * 执行命令并返回结果，静默处理错误
  */
 function callCommand(command) {
   try {
@@ -14,15 +14,16 @@ function callCommand(command) {
 }
 
 /**
- * 鑾峰彇褰撳墠骞翠唤鐨勫悗涓や綅
+ * 获取当前年份的后两位
  */
 function getYearSuffix() {
   return new Date().getFullYear().toString().slice(-2);
 }
 
 /**
- * 鑾峰彇褰撳墠鏄竴骞翠腑鐨勭鍑犲懆
- * ISO 鍛ㄦ暟锛氬懆涓€涓轰竴鍛ㄧ殑寮€濮嬶紝绗竴鍛ㄥ寘鍚骞寸殑绗竴涓懆鍥? */
+ * 获取当前是一年中的第几周
+ * ISO 周数：周一为一周的开始，第一周包含该年的第一个周四
+ */
 function getWeekNumber() {
   const date = new Date();
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -33,7 +34,8 @@ function getWeekNumber() {
 }
 
 /**
- * 鑾峰彇鎵€鏈夌幇鏈夌殑鍛ㄥ揩鐓ф爣绛? */
+ * 获取所有现有的周快照标签
+ */
 function getWeeklySnapshotTags() {
   const tags = callCommand('git tag -l').split('\n').filter(Boolean);
   const weeklyPattern = /^\d{2}w\d{1,2}[a-z]$/;
@@ -41,7 +43,8 @@ function getWeeklySnapshotTags() {
 }
 
 /**
- * 鑾峰彇鎸囧畾鍛ㄧ殑鎵€鏈夊揩鐓ф爣绛? */
+ * 获取指定周的所有快照标签
+ */
 function getSnapshotsForWeek(yearSuffix, weekNum) {
   const tags = getWeeklySnapshotTags();
   const weekPrefix = `${yearSuffix}w${weekNum}`;
@@ -49,7 +52,8 @@ function getSnapshotsForWeek(yearSuffix, weekNum) {
 }
 
 /**
- * 鑾峰彇涓嬩竴涓増鏈瓧姣? */
+ * 获取下一个版本字母
+ */
 function getNextLetter(existingTags, weekPrefix) {
   if (existingTags.length === 0) {
     return 'a';
@@ -65,14 +69,15 @@ function getNextLetter(existingTags, weekPrefix) {
 
   const charCode = lastLetter.charCodeAt(0);
   if (charCode >= 122) {
-    throw new Error('宸茶揪鍒版湰鍛ㄦ渶澶у揩鐓ф暟閲?(z)');
+    throw new Error('已达到本周最大快照数量 (z)');
   }
 
   return String.fromCharCode(charCode + 1);
 }
 
 /**
- * 鐢熸垚涓嬩竴涓懆蹇収鐗堟湰鍙? */
+ * 生成下一个周快照版本号
+ */
 function generateNextSnapshotVersion() {
   const yearSuffix = getYearSuffix();
   const weekNum = getWeekNumber();
@@ -85,8 +90,9 @@ function generateNextSnapshotVersion() {
 }
 
 /**
- * 鑾峰彇褰撳墠鍛ㄥ揩鐓х殑鍩虹鏍囩
- * 閫昏緫锛氳幏鍙栨渶鏂板彂甯冪殑浠讳綍绫诲瀷鐨?tag锛堟棤璁烘槸 Pre Release銆丷elease 杩樻槸姣忓懆蹇収锛? */
+ * 获取当前周快照的基础标签
+ * 逻辑：获取最新发布的任何类型的 tag（无论是 Pre Release、Release 还是每周快照）
+ */
 function getBaseTag() {
   const allTags = callCommand('git tag -l --sort=-creatordate').split('\n').filter(Boolean);
 
@@ -98,7 +104,8 @@ function getBaseTag() {
 }
 
 /**
- * 涓诲嚱鏁? */
+ * 主函数
+ */
 function main() {
   try {
     if (process.argv.includes('--get-base-tag')) {
@@ -115,13 +122,13 @@ function main() {
     if (process.argv.includes('--verbose')) {
       const yearSuffix = getYearSuffix();
       const weekNum = getWeekNumber();
-      console.error(`骞翠唤鍚庝袱浣? ${yearSuffix}`);
-      console.error(`鍛ㄦ暟: ${weekNum}`);
-      console.error(`鍩虹鏍囩: ${baseTag || '鏃?}`);
-      console.error(`涓嬩竴涓揩鐓х増鏈? ${nextVersion}`);
+      console.error(`年份后两位: ${yearSuffix}`);
+      console.error(`周数: ${weekNum}`);
+      console.error(`基础标签: ${baseTag || '无'}`);
+      console.error(`下一个快照版本: ${nextVersion}`);
     }
   } catch (error) {
-    console.error('鐢熸垚鍛ㄥ揩鐓х増鏈彿澶辫触:', error.message);
+    console.error('生成周快照版本号失败:', error.message);
     process.exit(1);
   }
 }
