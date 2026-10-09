@@ -183,8 +183,9 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/windows-msi/**
-            artifacts/macos-dmg/**
-            artifacts/linux-deb-appimage/**
+            artifacts/windows-msi/**/*.msi
+            artifacts/macos-dmg/**/*.dmg
+            artifacts/linux-deb-appimage/**/*.deb
+            artifacts/linux-deb-appimage/**/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
