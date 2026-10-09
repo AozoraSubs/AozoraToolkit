@@ -345,6 +345,7 @@ pub async fn run_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encode;
     use crate::encode::EncodeConfig;
     use crate::media_probe::find_in_path;
     use crate::planner;
@@ -367,8 +368,14 @@ mod tests {
     }
 
     fn config_for(encoder: &str, preset: &str, quality: u32) -> EncodeConfig {
+        let spec = encode::encoder_spec(encoder).expect("未知编码器");
+        let quality_mode = match spec.family {
+            encode::EncoderFamily::Software => encode::QualityMode::Crf,
+            encode::EncoderFamily::Nvenc => encode::QualityMode::Cq,
+        };
         let mut config = EncodeConfig::default();
         config.video.encoder_id = encoder.to_string();
+        config.video.quality_mode = quality_mode;
         config.video.preset = preset.to_string();
         config.video.quality_value = quality;
         config.video.pixel_format = None;
@@ -684,5 +691,77 @@ mod tests {
             "旧输出未被替换"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 实机验证：NVENC 编码器参数（p1/p7 预设 + CQ）可被真实 FFmpeg 接受。
+    /// 需要 NVIDIA GPU；无 GPU 的机器上该测试会失败（仅显式 --ignored 运行）。
+    #[tokio::test]
+    #[ignore = "requires ffmpeg on PATH and an NVIDIA GPU"]
+    async fn encode_nvenc_presets_and_cq_are_accepted() {
+        let ffmpeg = ffmpeg_on_path();
+        let dir = temp_dir("nvenc");
+        let input = dir.join("in.mkv");
+        // NVENC 有最小分辨率限制，使用 1280x720 输入。
+        generate_input_720p(&ffmpeg, &input, 1);
+
+        for (encoder, preset) in [
+            ("h264_nvenc", "p1"),
+            ("h264_nvenc", "p7"),
+            ("hevc_nvenc", "p5"),
+            ("av1_nvenc", "p5"),
+        ] {
+            let output = dir.join(format!("{encoder}-{preset}.mkv"));
+            let config = config_for(encoder, preset, 21);
+            let temp = planner::temp_output_path(&output, "e-test-nvenc");
+            let args = planner::build_args(&config, &input, &temp).unwrap();
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (event_tx, _event_rx) = collect_events();
+
+            let result = run_encode(
+                EncodeRequest {
+                    ffmpeg_path: ffmpeg.clone(),
+                    args,
+                    input_path: input.clone(),
+                    temp_path: temp.clone(),
+                    final_path: output.clone(),
+                    overwrite: false,
+                    duration_secs: None,
+                    cancel: cancel_rx,
+                },
+                event_tx,
+            )
+            .await;
+
+            assert_eq!(
+                result.status,
+                EncodeStatus::Completed,
+                "{encoder} {preset} 失败：{:?}",
+                result.error
+            );
+            assert!(output.is_file(), "{encoder} 输出不存在");
+            assert!(!temp.exists(), "{encoder} 临时文件未清理");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 生成 720p 测试输入（NVENC 最小分辨率限制）。
+    fn generate_input_720p(ffmpeg: &Path, output: &Path, seconds: u32) {
+        let status = std::process::Command::new(ffmpeg)
+            .args(["-y", "-f", "lavfi", "-i"])
+            .arg("testsrc=size=1280x720:rate=25")
+            .args(["-t"])
+            .arg(seconds.to_string())
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            .arg(output)
+            .output()
+            .expect("生成 720p 测试输入失败");
+        assert!(
+            status.status.success(),
+            "ffmpeg 生成 720p 测试输入失败：{}",
+            String::from_utf8_lossy(&status.stderr)
+                .lines()
+                .last()
+                .unwrap_or("无错误输出")
+        );
     }
 }
