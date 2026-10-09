@@ -1,14 +1,14 @@
 name: Weekly Snapshot Release
 
 on:
-  # 姣忓懆涓€ UTC 鏃堕棿 00:00 鑷姩鎵ц
+  # 每周一 UTC 时间 00:00 自动执行
   schedule:
     - cron: '0 0 * * 1'
-  # 鎵嬪姩瑙﹀彂
+  # 手动触发
   workflow_dispatch:
     inputs:
       base_tag:
-        description: '鍩虹鏍囩锛堝彲閫夛紝榛樿涓烘渶杩戠殑姝ｅ紡 release锛?
+        description: '基础标签（可选，默认为最近的正式 release）'
         required: false
         type: string
 
@@ -39,12 +39,13 @@ jobs:
       - name: Generate snapshot version
         id: version
         run: |
-          # 鐢熸垚涓嬩竴涓懆蹇収鐗堟湰鍙?          VERSION=$(node tools/weekly-snapshot.js)
+          # 生成下一个周快照版本号
+          VERSION=$(node tools/weekly-snapshot.js)
 
-          # 鑾峰彇鍩虹鏍囩
+          # 获取基础标签
           BASE_TAG=$(node tools/weekly-snapshot.js --get-base-tag)
 
-          # 濡傛灉鎵嬪姩鎸囧畾浜嗗熀纭€鏍囩锛屼娇鐢ㄦ墜鍔ㄦ寚瀹氱殑
+          # 如果手动指定了基础标签，使用手动指定的
           if [ -n "${{ github.event.inputs.base_tag }}" ]; then
             BASE_TAG="${{ github.event.inputs.base_tag }}"
           fi
@@ -52,10 +53,10 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
 
-          echo "鍛ㄥ揩鐓х増鏈? $VERSION"
-          echo "鍩虹鏍囩: ${BASE_TAG:-鏃爙"
+          echo "周快照版本: $VERSION"
+          echo "基础标签: ${BASE_TAG:-无}"
 
-          # 妫€鏌ユ槸鍚︽湁鎻愪氦
+          # 检查是否有提交
           if [ -n "$BASE_TAG" ]; then
             COMMIT_COUNT=$(git rev-list --count $BASE_TAG..HEAD)
           else
@@ -63,10 +64,10 @@ jobs:
           fi
 
           echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
-          echo "鏂版彁浜ゆ暟閲? $COMMIT_COUNT"
+          echo "新提交数量: $COMMIT_COUNT"
 
           if [ "$COMMIT_COUNT" -eq 0 ]; then
-            echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+            echo "没有新的提交，取消发布"
             echo "skip_release=true" >> $GITHUB_OUTPUT
           else
             echo "skip_release=false" >> $GITHUB_OUTPUT
@@ -79,16 +80,17 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           BASE_TAG=${{ steps.version.outputs.base_tag }}
 
-          # 鏋勫缓鍙傛暟
+          # 构建参数
           ARGS="--tag $VERSION --with-hash"
           if [ -n "$BASE_TAG" ]; then
             ARGS="$ARGS --base $BASE_TAG"
           fi
 
-          # 鐢熸垚 changelog
+          # 生成 changelog
           CHANGELOG_CONTENT=$(node tools/generate-changelog.js $ARGS --output-only)
 
-          # 淇濆瓨鍒拌緭鍑?          echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
+          # 保存到输出
+          echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
@@ -97,7 +99,7 @@ jobs:
       - name: Cancel release if no commits
         if: steps.version.outputs.skip_release == 'true'
         run: |
-          echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+          echo "没有新的提交，取消发布"
           exit 0
 
       - name: Download build artifacts (Windows)
@@ -128,10 +130,12 @@ jobs:
           tag_name: ${{ steps.version.outputs.version }}
           name: Snapshot ${{ steps.version.outputs.version }}
           body: |
-            # 姣忓懆蹇収鍙戝竷
+            # 每周快照发布
 
-            杩欐槸涓€涓瘡鍛ㄨ嚜鍔ㄧ敓鎴愮殑蹇収鐗堟湰锛岀敤浜庢祴璇曞拰棰勮鏈€鏂板姛鑳姐€?
-            鈿狅笍 **娉ㄦ剰**: 杩欐槸涓€涓鍙戝竷鐗堟湰锛屽彲鑳藉寘鍚笉绋冲畾鐨勫姛鑳姐€?
+            这是一个每周自动生成的快照版本，用于测试和预览最新功能。
+
+            ⚠️ **注意**: 这是一个预发布版本，可能包含不稳定的功能。
+
             ${{ steps.changelog.outputs.changelog_content }}
           draft: false
           prerelease: true
