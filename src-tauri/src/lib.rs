@@ -8,6 +8,8 @@ use std::path::PathBuf;
 struct AppInfo {
     name: &'static str,
     version: &'static str,
+    /// 周快照版本号（编译期注入；正式构建为 None）
+    snapshot: Option<&'static str>,
 }
 
 /// Returns basic application identity information for the UI.
@@ -16,6 +18,7 @@ fn app_info() -> AppInfo {
     AppInfo {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
+        snapshot: option_env!("AOZORA_SNAPSHOT_VERSION"),
     }
 }
 

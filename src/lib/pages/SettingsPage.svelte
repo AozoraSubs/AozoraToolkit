@@ -11,6 +11,7 @@
   type AppInfo = {
     name: string;
     version: string;
+    snapshot: string | null;
   };
 
   let appInfo = $state<AppInfo | null>(null);
@@ -104,7 +105,10 @@
     </div>
     <div>
       <dt>版本</dt>
-      <dd>{appInfo ? appInfo.version : "…"}</dd>
+      <dd>
+        {appInfo ? appInfo.version : "…"}
+        {appInfo?.snapshot ? `（快照 ${appInfo.snapshot}）` : ""}
+      </dd>
     </div>
   </dl>
 
