@@ -1,0 +1,165 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '鐗堟湰鍙?(渚嬪: v1.0.0)'
+        required: true
+        type: string
+      base_tag:
+        description: '鍩虹鏍囩 (鍙€夛紝榛樿涓轰笂涓€涓爣绛?'
+        required: false
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/build.yml
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get base tag
+        id: get-base-tag
+        run: |
+          # 濡傛灉鎵嬪姩鎸囧畾浜嗗熀纭€鏍囩锛屼娇鐢ㄦ墜鍔ㄦ寚瀹氱殑
+          if [ -n "${{ github.event.inputs.base_tag }}" ]; then
+            BASE_TAG="${{ github.event.inputs.base_tag }}"
+          else
+            # 鑾峰彇鏈€鏂扮殑浠讳綍绫诲瀷鏍囩锛堥€氱敤鏂瑰紡锛?            # 浼樺厛浣跨敤鏈€鏂扮殑姝ｅ紡 release锛堥€氳繃 GitHub API锛夛紝濡傛灉澶辫触鍒欎娇鐢ㄦ渶鏂版爣绛?            BASE_TAG=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+              | jq -r '.tag_name' 2>/dev/null)
+
+            # 濡傛灉杩樻槸娌℃湁鏍囩锛岃缃负绌哄瓧绗︿覆
+            if [ "$BASE_TAG" = "null" ]; then
+              BASE_TAG=""
+            fi
+          fi
+
+          echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
+          echo "浣跨敤鍩虹鏍囩: ${BASE_TAG:-鏃爙"
+
+          # 妫€鏌ユ槸鍚︽湁鎻愪氦
+          if [ -n "$BASE_TAG" ]; then
+            COMMIT_COUNT=$(git rev-list --count $BASE_TAG..HEAD)
+          else
+            # 濡傛灉娌℃湁鏍囩锛屾鏌ユ墍鏈夋彁浜?            COMMIT_COUNT=$(git rev-list --count HEAD)
+          fi
+
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+          echo "鏂版彁浜ゆ暟閲? $COMMIT_COUNT"
+
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+            echo "skip_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        run: |
+          # 鏋勫缓鍙傛暟
+          ARGS="--tag ${{ github.event.inputs.version }} --with-hash"
+          if [ -n "${{ steps.get-base-tag.outputs.base_tag }}" ]; then
+            ARGS="$ARGS --base ${{ steps.get-base-tag.outputs.base_tag }}"
+          fi
+
+          # 杩愯 changelog 鐢熸垚鍣?          CHANGELOG_CONTENT=$(node tools/generate-changelog.js $ARGS --output-only)
+
+          # 淇濆瓨鍒扮幆澧冨彉閲忥紝浣跨敤 GITHUB_OUTPUT 鏂瑰紡
+          echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # 鏄剧ず杈撳嚭鐢ㄤ簬璋冭瘯
+          echo "$CHANGELOG_CONTENT"
+
+      - name: Cancel release if no commits
+        if: steps.get-base-tag.outputs.skip_release == 'true'
+        run: |
+          echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+          exit 1
+
+      - name: Download build artifacts (Windows)
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-msi
+          path: artifacts/windows-msi
+
+      - name: Download build artifacts (macOS)
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: artifacts/macos-dmg
+
+      - name: Download build artifacts (Linux)
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-deb-appimage
+          path: artifacts/linux-deb-appimage
+
+      - name: Create Release
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          body: ${{ steps.changelog.outputs.changelog_content }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/windows-msi/**
+            artifacts/macos-dmg/**
+            artifacts/linux-deb-appimage/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update package.json version
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        run: |
+          # 鍒涘缓涓存椂鑴氭湰鏇存柊鐗堟湰
+          cat > update-version.js << 'EOF'
+          import fs from 'fs';
+          import path from 'path';
+          import { fileURLToPath } from 'url';
+
+          const __dirname = path.dirname(fileURLToPath(import.meta.url));
+          const pkgPath = path.join(__dirname, 'package.json');
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          pkg.version = process.argv[2].replace(/^v/, '');
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+          EOF
+
+          node update-version.js "${{ github.event.inputs.version }}"
+          rm update-version.js
+
+      - name: Commit version update
+        if: steps.get-base-tag.outputs.skip_release == 'false'
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add package.json CHANGELOG.md
+          git commit -m "chore: update version to ${{ github.event.inputs.version }}" || echo "No changes to commit"
+          git push

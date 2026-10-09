@@ -9,6 +9,8 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # 供发布 / 周快照工作流复用（每次提交的构建验证仍然保留）
+  workflow_call:
 
 permissions:
   contents: read

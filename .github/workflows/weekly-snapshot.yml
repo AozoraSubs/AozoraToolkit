@@ -1,0 +1,143 @@
+name: Weekly Snapshot Release
+
+on:
+  # 姣忓懆涓€ UTC 鏃堕棿 00:00 鑷姩鎵ц
+  schedule:
+    - cron: '0 0 * * 1'
+  # 鎵嬪姩瑙﹀彂
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: '鍩虹鏍囩锛堝彲閫夛紝榛樿涓烘渶杩戠殑姝ｅ紡 release锛?
+        required: false
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/build.yml
+
+  weekly-snapshot:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate snapshot version
+        id: version
+        run: |
+          # 鐢熸垚涓嬩竴涓懆蹇収鐗堟湰鍙?          VERSION=$(node tools/weekly-snapshot.js)
+
+          # 鑾峰彇鍩虹鏍囩
+          BASE_TAG=$(node tools/weekly-snapshot.js --get-base-tag)
+
+          # 濡傛灉鎵嬪姩鎸囧畾浜嗗熀纭€鏍囩锛屼娇鐢ㄦ墜鍔ㄦ寚瀹氱殑
+          if [ -n "${{ github.event.inputs.base_tag }}" ]; then
+            BASE_TAG="${{ github.event.inputs.base_tag }}"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
+
+          echo "鍛ㄥ揩鐓х増鏈? $VERSION"
+          echo "鍩虹鏍囩: ${BASE_TAG:-鏃爙"
+
+          # 妫€鏌ユ槸鍚︽湁鎻愪氦
+          if [ -n "$BASE_TAG" ]; then
+            COMMIT_COUNT=$(git rev-list --count $BASE_TAG..HEAD)
+          else
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+          fi
+
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+          echo "鏂版彁浜ゆ暟閲? $COMMIT_COUNT"
+
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+            echo "skip_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.version.outputs.skip_release == 'false'
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          BASE_TAG=${{ steps.version.outputs.base_tag }}
+
+          # 鏋勫缓鍙傛暟
+          ARGS="--tag $VERSION --with-hash"
+          if [ -n "$BASE_TAG" ]; then
+            ARGS="$ARGS --base $BASE_TAG"
+          fi
+
+          # 鐢熸垚 changelog
+          CHANGELOG_CONTENT=$(node tools/generate-changelog.js $ARGS --output-only)
+
+          # 淇濆瓨鍒拌緭鍑?          echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "$CHANGELOG_CONTENT"
+
+      - name: Cancel release if no commits
+        if: steps.version.outputs.skip_release == 'true'
+        run: |
+          echo "娌℃湁鏂扮殑鎻愪氦锛屽彇娑堝彂甯?
+          exit 0
+
+      - name: Download build artifacts (Windows)
+        if: steps.version.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-msi
+          path: artifacts/windows-msi
+
+      - name: Download build artifacts (macOS)
+        if: steps.version.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: artifacts/macos-dmg
+
+      - name: Download build artifacts (Linux)
+        if: steps.version.outputs.skip_release == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-deb-appimage
+          path: artifacts/linux-deb-appimage
+
+      - name: Create Pre-release
+        if: steps.version.outputs.skip_release == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Snapshot ${{ steps.version.outputs.version }}
+          body: |
+            # 姣忓懆蹇収鍙戝竷
+
+            杩欐槸涓€涓瘡鍛ㄨ嚜鍔ㄧ敓鎴愮殑蹇収鐗堟湰锛岀敤浜庢祴璇曞拰棰勮鏈€鏂板姛鑳姐€?
+            鈿狅笍 **娉ㄦ剰**: 杩欐槸涓€涓鍙戝竷鐗堟湰锛屽彲鑳藉寘鍚笉绋冲畾鐨勫姛鑳姐€?
+            ${{ steps.changelog.outputs.changelog_content }}
+          draft: false
+          prerelease: true
+          files: |
+            artifacts/windows-msi/**
+            artifacts/macos-dmg/**
+            artifacts/linux-deb-appimage/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
