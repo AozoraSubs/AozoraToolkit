@@ -11,7 +11,7 @@
 
 ## 实施进度总览
 
-- [ ] **M0：项目骨架** — 项目可开发、可检查、可构建
+- [x] **M0：项目骨架** — 项目可开发、可检查、可构建（详见下方完成记录）
 - [ ] **M1：媒体探测** — FFmpeg/FFprobe 能力检测与媒体流展示
 - [ ] **M2：单任务压制** — 参数生成、编码进程、进度、取消和输出收尾
 - [ ] **M3：预设与队列** — 预设持久化、队列、重试和历史
@@ -22,14 +22,14 @@
 
 ### M0：项目骨架
 
-- [ ] 初始化 Tauri 2 + Svelte 5 + TypeScript + Rust 项目
-- [ ] 使用 pnpm 作为唯一 JavaScript 包管理器
-- [ ] 在 `package.json` 中固定经过验证的 pnpm 版本
-- [ ] 提交 `pnpm-lock.yaml`，不生成其他包管理器锁文件
-- [ ] 配置格式化、Lint、类型检查和测试脚本
-- [ ] 配置基础 CI 检查
-- [ ] 建立基础窗口与导航
-- [ ] 验证开发、测试和打包流程可重复运行
+- [x] 初始化 Tauri 2 + Svelte 5 + TypeScript + Rust 项目
+- [x] 使用 pnpm 作为唯一 JavaScript 包管理器
+- [x] 在 `package.json` 中固定经过验证的 pnpm 版本
+- [x] 提交 `pnpm-lock.yaml`，不生成其他包管理器锁文件
+- [x] 配置格式化、Lint、类型检查和测试脚本
+- [x] 配置基础 CI 检查（工作流已提交；GitHub 上尚未实际运行，见完成记录）
+- [x] 建立基础窗口与导航
+- [x] 验证开发、测试和打包流程可重复运行（dev / 检查 / 测试 / MSI 打包已验证；NSIS 因本机网络下载超时未验证，见完成记录）
 
 ### M1：媒体探测
 
@@ -100,6 +100,23 @@
 - **结果：** 通过 / 失败 / 未执行及原因
 - **PLAN 更新：** 勾选或保持未勾选的条目
 - **剩余工作：** 下一项尚未完成的任务
+
+---
+
+## 完成记录
+
+### 2026-10-10：M0 项目骨架
+
+- **本次完成：** M0 全部 8 项——Tauri 2 + Svelte 5 + TypeScript + Rust 项目初始化；pnpm 唯一包管理并固定 `pnpm@11.24.0`；提交 `pnpm-lock.yaml`（无其他包管理器锁文件）；格式化 / Lint / 类型检查 / 测试脚本（prettier、eslint、svelte-check、vitest）；基础 CI 工作流；基础窗口与四区导航（压制 / 任务 / 预设 / 设置）。
+- **验证方式与结果（全部实际执行）：**
+  - 前端：`pnpm run check`（0 错误）、`pnpm run lint`（0 问题）、`pnpm run format:check`（通过）、`pnpm test`（4/4 通过）、`pnpm build`（通过）。
+  - Rust：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`（1/1 通过）。
+  - 开发流程：`pnpm tauri dev` 实际启动，窗口标题 "Aozora Encode"，vite 监听 1420，稳定运行。
+  - 打包流程：`pnpm tauri build` release 编译成功（release exe 实际启动验证通过）；MSI 安装包成功产出（两次构建均成功）。
+  - 未验证 / 失败项：NSIS 安装包因本机网络对 GitHub 二进制下载超时未产出（环境问题，非项目配置问题）；按用户要求暂缓处理。CI 工作流已提交但 GitHub Actions 尚未实际运行（仓库尚未推送远端）。
+- **环境说明（本机特有问题，已在 README 记录）：** 本机未安装 MSVC Build Tools，使用 Windows GNU 工具链 + mingw-w64 binutils（用户级安装）；`registry.npmjs.org` 被网络拦截，本机 pnpm 使用 npmmirror 镜像（用户级 `.npmrc`，未入库）；已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器导出序号上限。
+- **PLAN 更新：** M0 总览与 8 项清单全部勾选；§11 里程碑 M0 子项勾选。
+- **剩余工作：** 进入 M1（媒体探测）；NSIS 打包验证与 CI 远端运行验证待后续补做。
 
 ---
 
@@ -593,11 +610,11 @@ SQLite。第一版没有必要仅为了"专业架构"而先引入数据库。
 
 ### M0：项目骨架
 
--   [ ] 初始化 Tauri 2 + Svelte + TypeScript。
--   [ ] 配置格式化、Lint、类型检查和 CI。
--   [ ] 建立基础窗口与导航。
+-   [x] 初始化 Tauri 2 + Svelte + TypeScript。
+-   [x] 配置格式化、Lint、类型检查和 CI。
+-   [x] 建立基础窗口与导航。
 
-**完成标准：** 开发、测试和打包流程可重复运行。
+**完成标准：** 开发、测试和打包流程可重复运行。已完成（NSIS 例外见完成记录）。
 
 ### M1：媒体探测
 
