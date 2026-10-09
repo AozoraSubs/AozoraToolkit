@@ -1,0 +1,98 @@
+name: build
+
+# 三平台构建验证：Windows 为主要分发目标（MSI），
+# macOS / Linux 仅用于验证代码可移植性并尽早发现平台差异，
+# 不承诺全平台发布质量（macOS 产物不签名、不公证）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  check-and-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-2022
+            bundles: msi
+            artifact: windows-msi
+          - platform: macos-14
+            bundles: dmg
+            artifact: macos-dmg
+          - platform: ubuntu-24.04
+            bundles: deb appimage
+            artifact: linux-deb-appimage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies (WebKitGTK etc.)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        run: |
+          pnpm run check
+          pnpm run lint
+          pnpm run format:check
+          pnpm test
+
+      - name: Rust checks
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test
+
+      - name: Build and bundle
+        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
