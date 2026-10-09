@@ -387,7 +387,7 @@ mod tests {
         let mut command = std::process::Command::new(ffmpeg);
         command
             .args(["-y", "-f", "lavfi", "-i"])
-            .arg(format!("testsrc=size=320x240:rate=25"))
+            .arg("testsrc=size=320x240:rate=25")
             .args([
                 "-f",
                 "lavfi",
@@ -421,10 +421,12 @@ mod tests {
 
     #[test]
     fn snapshot_computes_percent_and_eta() {
-        let mut record = ProgressRecord::default();
-        record.out_time_us = Some(5_000_000);
-        record.speed = Some(2.0);
-        record.progress = Some("continue".to_string());
+        let record = ProgressRecord {
+            out_time_us: Some(5_000_000),
+            speed: Some(2.0),
+            progress: Some("continue".to_string()),
+            ..ProgressRecord::default()
+        };
         let snapshot = snapshot_from_record(&record, Some(20.0));
         assert!(snapshot.duration_known);
         assert_eq!(snapshot.percent, 25.0);
@@ -438,9 +440,11 @@ mod tests {
 
     #[test]
     fn snapshot_clamps_percent_and_forces_end() {
-        let mut record = ProgressRecord::default();
-        record.out_time_us = Some(21_000_000);
-        record.progress = Some("continue".to_string());
+        let mut record = ProgressRecord {
+            out_time_us: Some(21_000_000),
+            progress: Some("continue".to_string()),
+            ..ProgressRecord::default()
+        };
         assert_eq!(snapshot_from_record(&record, Some(20.0)).percent, 100.0);
 
         record.progress = Some("end".to_string());
@@ -450,9 +454,11 @@ mod tests {
 
     #[test]
     fn snapshot_eta_requires_positive_speed_and_remaining() {
-        let mut record = ProgressRecord::default();
-        record.out_time_us = Some(2_000_000);
-        record.speed = Some(0.0);
+        let mut record = ProgressRecord {
+            out_time_us: Some(2_000_000),
+            speed: Some(0.0),
+            ..ProgressRecord::default()
+        };
         assert_eq!(snapshot_from_record(&record, Some(20.0)).eta_secs, None);
         record.speed = Some(10.0);
         record.out_time_us = Some(20_000_000);

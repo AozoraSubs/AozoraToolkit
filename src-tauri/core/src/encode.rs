@@ -347,8 +347,10 @@ mod tests {
 
     #[test]
     fn schema_version_mismatch_is_rejected() {
-        let mut config = EncodeConfig::default();
-        config.schema_version = 99;
+        let config = EncodeConfig {
+            schema_version: 99,
+            ..EncodeConfig::default()
+        };
         assert!(validate_config(&config).is_err());
     }
 
