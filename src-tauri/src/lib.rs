@@ -48,6 +48,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::probe::detect_tools,
+            commands::probe::detect_capabilities,
+            commands::probe::probe_media_file,
             commands::settings::set_custom_tool_dir
         ])
         .run(tauri::generate_context!())
