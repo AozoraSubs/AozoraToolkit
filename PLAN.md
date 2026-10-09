@@ -117,13 +117,32 @@
 - **PLAN 更新：** M0 总览与清单全部勾选；§11 里程碑 M0 子项勾选；移除 CI 条目并按范围调整打包验证表述。
 - **剩余工作：** 进入 M1（媒体探测）。
 
+### 2026-10-10（补充）：多平台可行性检查与范围确认
+
+- **本次完成：** 对 Linux / macOS / Windows 多平台开发的可行性进行检查；结论为当前环境不可行，按用户指示维持"第一阶段仅 Windows 10/11 x64 桌面端"的范围。
+- **验证方式与结果（全部实际执行）：**
+  - 代码检查：`src-tauri/Cargo.toml` 仅含跨平台依赖（tauri、tauri-plugin-opener、serde、serde_json），无 `windows` crate 或平台专属依赖；应用代码中无平台相关 `cfg` 分支（仅脚手架自带的 `windows_subsystem` 属性，对其他平台为 no-op）。
+  - 环境检查：本机已安装的 Rust 编译目标仅 `x86_64-pc-windows-gnu`（无 Linux / macOS 目标）；开发机为 Windows，没有 macOS / Linux 构建环境。
+  - 打包与 CI：`bundle.targets` 仅保留 `msi`（Windows 专用）；CI 工作流已移出范围（无 `.github` 目录），无法借助远程构建矩阵验证其他平台。
+- **结论：** Tauri 2 + Svelte 5 技术栈本身跨平台，当前代码也没有平台硬依赖；但"多平台可行"需要能在对应平台上实际构建与验证产物——macOS 打包必须使用 macOS + Xcode，Linux 需要相应构建环境与 WebKitGTK 验证，本机均不具备，CI 也不在范围内。因此维持仅 Windows 开发；后续代码继续保持可移植写法（不引入平台专属依赖），待具备其他平台环境时再重新评估。
+- **PLAN 更新：** 无任务勾选变化；本条目仅记录范围确认与可行性结论。
+- **剩余工作：** 进入 M1（媒体探测）。
+
+### 2026-10-10（追加）：引入 GitHub Actions 三平台构建验证 CI
+
+- **本次完成：** 按用户决定恢复 CI 并扩展为三平台构建验证。新增 `.github/workflows/build.yml`：Windows 出 MSI、macOS 出 dmg、Linux 出 deb + AppImage；同一矩阵内运行前端检查（check / lint / format / test）与 Rust 检查（fmt / clippy / test），打包产物上传为 artifacts。同步更新 AGENTS.md 技术边界与 README。
+- **范围调整：** 撤回此前"CI 完全移出项目范围"的决定：CI 不再属于排除项，但只承担构建验证职责；macOS 产物不签名、不公证，不构成全平台发布承诺。Windows MSI 仍是唯一分发目标，NSIS 打包仍不在范围内，移动端仍排除。
+- **验证方式与结果：** 工作流文件已写入仓库并通过结构自检；本机没有配置 git remote、无法触发 GitHub Actions，**尚未实际运行 CI**，需推送后观察三平台首跑结果再确认。
+- **PLAN 更新：** 更新技术方案正文"目标平台"与 §1.2 非目标表述；无里程碑任务勾选变化。
+- **剩余工作：** 推送至 GitHub 后验证 CI 首跑；继续 M1（媒体探测）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
 
 -   文档版本：1.0
 -   状态：初版方案，可作为项目 README / 技术设计基线
--   目标平台：Windows 10/11 x64 优先
+-   目标平台：Windows 10/11 x64 优先（唯一分发目标）；GitHub CI 在 Windows / macOS / Linux 三平台做构建验证
 -   核心定位：本地运行、轻量、可靠、面向动画与日常视频压制的桌面工具
 -   核心原则：不重新实现编码器；以 FFmpeg / FFprobe 为媒体引擎
 
@@ -156,7 +175,7 @@
 -   云端编码、账号系统、遥测服务或在线预设市场。
 -   专业 NLE 视频剪辑功能。
 -   自动判断任何片源的"最佳画质参数"并承诺统一结果。
--   第一版就支持 Windows、macOS、Linux 全平台发布。
+-   第一版就支持 Windows、macOS、Linux 全平台发布（CI 仅做多平台构建验证，不含签名、公证与发布）。
 
 这些功能可以根据真实需求后续增加，不应成为 MVP 的前置条件。
 

@@ -106,6 +106,8 @@ cargo test
 pnpm tauri build
 ```
 
+CI 构建验证：`.github/workflows/build.yml` 在 Windows / macOS / Linux 三平台运行检查与打包（Windows 出 MSI、macOS 出 dmg、Linux 出 deb + AppImage）。macOS 产物未签名、未公证，仅用于验证代码可移植性；Windows MSI 是当前唯一的分发目标。
+
 ## 编码器与画质说明
 
 编码器的质量参数不可直接横向比较。例如 x264/x265 的 CRF 与 NVENC 的 CQ 并非同一标尺。推荐预设只应作为起点，不得宣称适用于所有片源的“最佳参数”。
