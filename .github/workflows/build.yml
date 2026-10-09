@@ -1,15 +1,15 @@
 name: build
 
-# 三平台构建验证：Windows 为主要分发目标（MSI），
-# macOS / Linux 仅用于验证代码可移植性并尽早发现平台差异，
-# 不承诺全平台发布质量（macOS 产物不签名、不公证）。
+# 每次推送 / PR：只运行三平台检查（前端检查 + cargo fmt/clippy/test），
+# 不执行打包以节省 Actions 时间；完整打包（MSI/dmg/deb/AppImage）由发布 /
+# 周快照工作流通过 workflow_call 传入 build_bundles: true 时执行。
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
-  # 供发布 / 周快照工作流复用（每次提交的构建验证仍然保留）
+  # 供发布 / 周快照工作流复用（每次提交的检查验证仍然保留）
   workflow_call:
     inputs:
       ref:
@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: ""
+      build_bundles:
+        description: "是否执行完整打包并上传产物（发布流程设为 true）"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -98,15 +103,17 @@ jobs:
           cargo test
 
       - name: Build and bundle
+        if: inputs.build_bundles == true
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
       - name: Verify macOS bundle signature
-        if: runner.os == 'macOS'
+        if: inputs.build_bundles == true && runner.os == 'macOS'
         run: |
           codesign --verify --deep --strict --verbose=2 \
             "src-tauri/target/release/bundle/macos/Aozora Encode.app"
 
       - name: Upload bundles
+        if: inputs.build_bundles == true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

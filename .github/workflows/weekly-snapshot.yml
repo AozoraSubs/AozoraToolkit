@@ -18,6 +18,8 @@ jobs:
       contents: read
       actions: write
     uses: ./.github/workflows/build.yml
+    with:
+      build_bundles: true
 
   weekly-snapshot:
     needs: build
