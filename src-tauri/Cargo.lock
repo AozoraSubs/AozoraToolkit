@@ -61,12 +61,14 @@ name = "aozora-encode"
 version = "0.2.1"
 dependencies = [
  "aozora-core",
+ "embed-resource",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tokio",
 ]
 
 [[package]]

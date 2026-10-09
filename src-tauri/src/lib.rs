@@ -1,4 +1,5 @@
 mod commands;
+mod jobs;
 mod settings;
 
 use serde::Serialize;
@@ -56,8 +57,12 @@ pub fn run() {
             commands::probe::detect_tools,
             commands::probe::detect_capabilities,
             commands::probe::probe_media_file,
-            commands::settings::set_custom_tool_dir
+            commands::settings::set_custom_tool_dir,
+            commands::jobs::preview_job_args,
+            commands::jobs::start_job,
+            commands::jobs::cancel_job
         ])
+        .manage(jobs::JobState::default())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
