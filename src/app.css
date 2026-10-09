@@ -1,0 +1,96 @@
+:root {
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-border: #d9dce2;
+  --color-text: #1f2329;
+  --color-text-secondary: #5d6570;
+  --color-accent: #3b82f6;
+  --color-accent-contrast: #ffffff;
+  --color-hover: #eceef2;
+  --color-active: #dbe7fd;
+  --color-danger: #c0392b;
+
+  font-family:
+    system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #15171b;
+    --color-surface: #1e2127;
+    --color-border: #33383f;
+    --color-text: #e7eaee;
+    --color-text-secondary: #9aa3ae;
+    --color-accent: #4c8df6;
+    --color-hover: #262a31;
+    --color-active: #2c3d5c;
+    --color-danger: #e06c5e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#app {
+  height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+.page header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.page .hint {
+  margin: 0 0 20px;
+  color: var(--color-text-secondary);
+}
+
+.placeholder {
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  max-width: 560px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.placeholder strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.placeholder ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.error {
+  color: var(--color-danger);
+}
