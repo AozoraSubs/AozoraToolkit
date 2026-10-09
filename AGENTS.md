@@ -32,6 +32,7 @@
 - 前端：Svelte 5 + TypeScript。
 - JavaScript 包管理器：pnpm；本项目不使用 npm 或 Yarn 管理依赖。
 - 桌面框架：Tauri 2。
+- 本项目仅面向 Windows 10/11 x64 **桌面端**：第一阶段不做 macOS、Linux、Android/iOS 的构建、打包与兼容性适配，也不为移动端做额外工作（例如为移动端保留 `cdylib`、配置移动 capabilities、验证其他平台的打包流程）。桌面打包只验证 Windows 的 MSI / NSIS，遇到其他平台的构建或兼容问题不处理、不优化。
 - 核心任务、配置验证、进程管理：Rust。
 - 媒体处理：通过外部 FFmpeg / FFprobe 进程完成。
 - 预设与应用配置：版本化 JSON + Serde。
