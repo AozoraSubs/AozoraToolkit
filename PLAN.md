@@ -34,7 +34,7 @@
 ### M1：媒体探测
 
 - [ ] FFmpeg / FFprobe 安装检测（检测顺序：运行环境 PATH → 工具箱安装目录下的 `bin` 文件夹 → 用户指定路径文件夹下的可执行文件；未安装时在 M1 阶段给出可读错误提示。平台差异：macOS / Linux 只检测 PATH 中的 `ffmpeg` / `ffprobe` 命令即可；「指定路径」只对 Windows 有意义，且在 M6 下载 FFmpeg 功能落地后更有用）
-- [ ] 配置 FFmpeg / FFprobe 路径（Windows：支持指定包含可执行文件的文件夹）
+- [ ] 自定义 FFmpeg 实例路径（用户手动指定自定义 FFmpeg / FFprobe 路径；Windows 下指向包含可执行文件的文件夹）
 - [ ] 检测 FFmpeg / FFprobe 版本
 - [ ] 检测实际可用的编码器与滤镜能力
 - [ ] 实现文件选择和拖放导入
@@ -95,6 +95,7 @@
 ### M6：功能增强
 
 - [ ] 下载 FFmpeg（将 FFmpeg / FFprobe 下载或内置到工具箱安装目录下的 `bin` 文件夹，作为安装检测顺序中的第二步；Windows 优先）
+- [ ] 多 FFmpeg 实例下拉选择（检测到多个实例时——运行目录 `bin/ffmpeg`、PATH 命令、自定义实例——设置页提供下拉框选择实际使用的 FFmpeg / FFprobe）
 
 ## 每次开发任务的完成记录
 
@@ -650,7 +651,7 @@ SQLite。第一版没有必要仅为了"专业架构"而先引入数据库。
 ### M1：媒体探测
 
 -   [ ] 检测 FFmpeg/FFprobe 安装（顺序：PATH → 安装目录 `bin` → 指定路径；未安装给出错误提示；macOS/Linux 仅检测 PATH 命令，指定路径仅 Windows 使用）。
--   [ ] 配置 FFmpeg/FFprobe 路径。
+-   [ ] 自定义 FFmpeg/FFprobe 实例路径。
 -   [ ] 探测版本和编码器能力。
 -   [ ] 导入文件并显示流信息。
 
@@ -694,6 +695,7 @@ SQLite。第一版没有必要仅为了"专业架构"而先引入数据库。
 ### M6：功能增强
 
 -   [ ] 下载 FFmpeg 到工具箱安装目录 `bin`。
+-   [ ] 多实例下拉选择（设置页，多实例并存时选择实际使用的 FFmpeg）。
 
 **完成标准：** 未安装 FFmpeg 的用户可在应用内直接获取 FFmpeg / FFprobe。
 
