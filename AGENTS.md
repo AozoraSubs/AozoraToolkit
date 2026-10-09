@@ -33,7 +33,7 @@
 - JavaScript 包管理器：pnpm；本项目不使用 npm 或 Yarn 管理依赖。
 - 桌面框架：Tauri 2。
 - **分发目标**：Windows 10/11 x64 桌面端；桌面打包只验证 Windows 的 MSI 安装包（NSIS 不在范围内）。
-- **CI 多平台构建验证**：使用 GitHub Actions（`.github/workflows/build.yml`）在 Windows / macOS / Linux 三平台验证构建（Windows 出 MSI、macOS 出 dmg、Linux 出 deb + AppImage），以保证代码保持可移植并尽早发现平台差异。这不等同于全平台发布承诺：macOS 产物使用 ad-hoc 签名、不公证（首次打开仍需在「系统设置 → 隐私与安全性」中允许，或移除 quarantine 属性，见 README）；其他平台的运行时问题按低优先级处理，不阻塞 Windows 主目标。
+- **CI 检查与构建**：每次推送 / PR 由 GitHub Actions（`.github/workflows/build.yml`）在 Windows / macOS / Linux 三平台运行**检查**（前端 check/lint/format/test + `cargo fmt`/`clippy`/`test`），不执行打包以节省时间；发布与周快照工作流通过 `workflow_call`（`build_bundles: true`）复用同一工作流执行**完整打包**（Windows MSI、macOS dmg、Linux deb + AppImage）并上传产物。这不等同于全平台发布承诺：macOS 产物使用 ad-hoc 签名、不公证（首次打开仍需在「系统设置 → 隐私与安全性」中允许，或移除 quarantine 属性，见 README）；其他平台的运行时问题按低优先级处理，不阻塞 Windows 主目标。
 - **移动端**（Android/iOS）不在范围内：不保留 `cdylib`、不配置移动 capabilities、不验证移动构建。
 - 核心任务、配置验证、进程管理：Rust。
 - 媒体处理：通过外部 FFmpeg / FFprobe 进程完成。
