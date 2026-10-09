@@ -188,8 +188,7 @@ mod tests {
         let path_entries: Vec<std::path::PathBuf> = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect())
             .unwrap_or_default();
-        let ffmpeg =
-            find_in_path("ffmpeg", &path_entries).expect("ffmpeg 未在 PATH 中检测到");
+        let ffmpeg = find_in_path("ffmpeg", &path_entries).expect("ffmpeg 未在 PATH 中检测到");
         let report = detect_capabilities(&ffmpeg);
         assert!(report.encoder_count > 0, "编码器列表为空");
         assert!(report.filter_count > 0, "滤镜列表为空");
