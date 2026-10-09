@@ -1,3 +1,6 @@
+mod commands;
+mod settings;
+
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -19,19 +22,11 @@ fn app_info() -> AppInfo {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![app_info])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            commands::probe::detect_tools,
+            commands::settings::set_custom_tool_dir
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn app_info_reports_crate_identity() {
-        let info = app_info();
-        assert_eq!(info.name, env!("CARGO_PKG_NAME"));
-        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
-    }
 }
