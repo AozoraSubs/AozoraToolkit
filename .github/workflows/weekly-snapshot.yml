@@ -13,20 +13,15 @@ on:
         type: string
 
 jobs:
-  build:
-    permissions:
-      contents: read
-      actions: write
-    uses: ./.github/workflows/build.yml
-    with:
-      build_bundles: true
-
-  weekly-snapshot:
-    needs: build
+  # 第一步：计算快照版本号（只读，不产生任何提交）
+  snapshot-version:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-
+      contents: read
+    outputs:
+      version: ${{ steps.gen.outputs.version }}
+      base_tag: ${{ steps.gen.outputs.base_tag }}
+      skip_release: ${{ steps.gen.outputs.skip_release }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,7 +34,7 @@ jobs:
           node-version: "20"
 
       - name: Generate snapshot version
-        id: version
+        id: gen
         run: |
           # 生成下一个周快照版本号
           VERSION=$(node tools/weekly-snapshot.js)
@@ -75,12 +70,41 @@ jobs:
             echo "skip_release=false" >> $GITHUB_OUTPUT
           fi
 
+  # 第二步：三平台构建；快照版本号临时注入二进制并标记产物文件名，不产生提交
+  build:
+    needs: snapshot-version
+    if: needs.snapshot-version.outputs.skip_release == 'false'
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/build.yml
+    with:
+      build_bundles: true
+      snapshot_version: ${{ needs.snapshot-version.outputs.version }}
+
+  # 第三步：构建全部通过后创建快照 Pre-release 并附带产物
+  weekly-snapshot:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Generate changelog
         id: changelog
-        if: steps.version.outputs.skip_release == 'false'
         run: |
-          VERSION=${{ steps.version.outputs.version }}
-          BASE_TAG=${{ steps.version.outputs.base_tag }}
+          VERSION=${{ needs.snapshot-version.outputs.version }}
+          BASE_TAG=${{ needs.snapshot-version.outputs.base_tag }}
 
           # 构建参数
           ARGS="--tag $VERSION --with-hash"
@@ -98,39 +122,29 @@ jobs:
 
           echo "$CHANGELOG_CONTENT"
 
-      - name: Cancel release if no commits
-        if: steps.version.outputs.skip_release == 'true'
-        run: |
-          echo "没有新的提交，取消发布"
-          exit 0
-
       - name: Download build artifacts (Windows)
-        if: steps.version.outputs.skip_release == 'false'
         uses: actions/download-artifact@v4
         with:
           name: windows-msi
           path: artifacts/windows-msi
 
       - name: Download build artifacts (macOS)
-        if: steps.version.outputs.skip_release == 'false'
         uses: actions/download-artifact@v4
         with:
           name: macos-dmg
           path: artifacts/macos-dmg
 
       - name: Download build artifacts (Linux)
-        if: steps.version.outputs.skip_release == 'false'
         uses: actions/download-artifact@v4
         with:
           name: linux-deb-appimage
           path: artifacts/linux-deb-appimage
 
       - name: Create Pre-release
-        if: steps.version.outputs.skip_release == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Snapshot ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.snapshot-version.outputs.version }}
+          name: Snapshot ${{ needs.snapshot-version.outputs.version }}
           body: |
             # 每周快照发布
 

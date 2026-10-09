@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: false
+      snapshot_version:
+        description: "周快照版本号（如 26w41a）；非空时注入二进制并标记产物文件名"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -105,6 +110,25 @@ jobs:
       - name: Build and bundle
         if: inputs.build_bundles == true
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
+        env:
+          # 周快照：把快照版本号编译进二进制（关于页展示），不修改任何版本文件
+          AOZORA_SNAPSHOT_VERSION: ${{ inputs.snapshot_version }}
+
+      - name: Tag bundle file names with snapshot version
+        if: inputs.build_bundles == true && inputs.snapshot_version != ''
+        shell: bash
+        run: |
+          SNAP="${{ inputs.snapshot_version }}"
+          ROOT="src-tauri/target/release/bundle"
+          find "$ROOT" -type f \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) -print0 \
+            | while IFS= read -r -d '' f; do
+                base=$(basename "$f")
+                new=$(echo "$base" | sed -E "s/_([0-9]+\.[0-9]+\.[0-9]+)/_\1.${SNAP}/")
+                if [ "$new" != "$base" ]; then
+                  mv "$f" "$(dirname "$f")/$new"
+                  echo "renamed: $base -> $new"
+                fi
+              done
 
       - name: Verify macOS bundle signature
         if: inputs.build_bundles == true && runner.os == 'macOS'
