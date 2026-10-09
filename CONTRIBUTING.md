@@ -63,7 +63,7 @@ test(progress): cover missing out_time fields
 
 更新规则：
 
-1. 在 PLAN.md 勾选对应里程碑完成项的同时更新版本号；功能未完成不得提前升版本。
+1. 版本号**不随里程碑完成自动更新**；仅在用户明确要求时更新。更新时综合评估自上一版本以来的累积变更（里程碑完成、不兼容变更、缺陷修复等），按上述幅度定义决定升主版本、次版本或修订号，并说明依据。
 2. 版本号必须同步更新以下位置，保持一致：`package.json` 的 `version`、`src-tauri/tauri.conf.json` 的 `version`、`src-tauri/Cargo.toml` 与 `src-tauri/core/Cargo.toml` 的 `version`；`Cargo.lock` 由 cargo 自动同步。
 3. 版本变更独立提交（`build:` 类型，如 `build: 版本号升级至 0.2.0`），不与功能改动混在同一提交。
 4. 打包产物（MSI 文件名）自动携带版本号，不手工修改产物文件名。
