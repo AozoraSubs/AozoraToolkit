@@ -106,7 +106,12 @@ cargo test
 pnpm tauri build
 ```
 
-CI 构建验证：`.github/workflows/build.yml` 在 Windows / macOS / Linux 三平台运行检查与打包（Windows 出 MSI、macOS 出 dmg、Linux 出 deb + AppImage）。macOS 产物未签名、未公证，仅用于验证代码可移植性；Windows MSI 是当前唯一的分发目标。
+CI 构建验证：`.github/workflows/build.yml` 在 Windows / macOS / Linux 三平台运行检查与打包（Windows 出 MSI、macOS 出 dmg、Linux 出 deb + AppImage）。macOS 产物使用 ad-hoc 签名、未公证，仅用于验证代码可移植性；Windows MSI 是当前唯一的分发目标。
+
+macOS 首次打开 CI 产物：由于未公证，Gatekeeper 会拦截。把 app 拖入"应用程序"后，二选一：
+
+- 图形界面：系统设置 → 隐私与安全性 → 安全性 → 点"仍要打开"；
+- 终端：`xattr -d com.apple.quarantine "/Applications/Aozora Encode.app"`
 
 ## 编码器与画质说明
 

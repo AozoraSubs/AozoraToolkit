@@ -136,6 +136,13 @@
 - **PLAN 更新：** 更新技术方案正文"目标平台"与 §1.2 非目标表述；无里程碑任务勾选变化。
 - **剩余工作：** 推送至 GitHub 后验证 CI 首跑；继续 M1（媒体探测）。
 
+### 2026-10-10（追加二）：修复 macOS 产物"已损坏"问题
+
+- **本次完成：** 用户反馈 CI 产出的 macOS dmg 打开时提示"已损坏"（Gatekeeper 拦截无签名产物）。按 Tauri 官方支持的方式为 macOS 产物添加 ad-hoc 签名：新增 `src-tauri/tauri.macos.conf.json`（`bundle.macOS.signingIdentity: "-"`，仅 macOS 构建时合并），并在 CI 的 macOS 任务中新增 `codesign --verify --deep --strict` 验证步骤，确保签名实际生效。README 补充首次打开说明（系统设置"仍要打开"或移除 quarantine 属性）。
+- **验证方式：** 方案依据 Tauri 官方文档与社区验证过的配置；`codesign` 验证步骤将在下次 CI macOS 任务实际执行，本机（Windows）无法直接验证。
+- **PLAN 更新：** 无任务勾选变化；AGENTS.md 平台边界表述同步更新（ad-hoc 签名、不公证）。
+- **剩余工作：** 推送后从 GitHub 重新下载新版 dmg 验证；正式分发仍需 Apple Developer ID 签名 + 公证（付费开发者账号，不在当前范围）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
