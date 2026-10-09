@@ -12,7 +12,10 @@ edition = "2021"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "aozora_encode_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# 桌面版暂不包含 `cdylib`：Windows-GNU 目标下 DLL 导出序号为 16 位，
+# 大型依赖树会超过 65535 个导出符号导致链接失败。
+# 需要移动端构建时再按需加回。
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
