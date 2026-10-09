@@ -157,7 +157,7 @@
   - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（8 通过 / 2 ignored）全部通过。
   - 实机检测（ignored 测试，本机 ffmpeg 9.0）：PATH 检测 + 版本横幅 ✓；注入真实 ffmpeg 目录验证 bin 分支（来源 `app_bin`）与自定义路径分支（来源 `custom`）✓。
   - 前端：`pnpm run check`（0 错误）、`pnpm run lint`、`pnpm run format:check`、`pnpm test`（5/5）、`pnpm build` 全部通过。
-- **限制（如实记录）：** 本会话的 DSH 沙箱限制孙进程对 `%LOCALAPPDATA%` 等目录的访问，导致 WebView2 初始化失败（ERROR_BUSY / 拒绝访问；今天早些时候可正常运行的旧 release exe 同样复现，确认与本次代码无关）。因此**设置页 GUI 冒烟未能在本会话完成**，需在正常终端执行 `pnpm tauri dev` 人工验证界面；检测逻辑本身已由上述实机测试覆盖。
+- **限制（如实记录，2026-10-10 晚更新结论）：** 从仓库 `target` 目录运行的 exe 在本机初始化 WebView2 失败（`0x8000FFFF`，重装 Rust / 重装 WebView2 运行时 / 修复目录所有者均无效）；而**安装到系统（MSI 安装包，`Program Files`）的旧版本应用一直正常运行**——问题仅限"从 DSH 工作区路径启动的进程"（沙箱限制），与 M1 代码无关（已用诊断程序证明：同一台机器、同一份二进制，数据目录放工作区内成功、放 `%LOCALAPPDATA%` 下失败）。因此**GUI 人工验证请使用安装包安装后的应用**；`pnpm tauri dev` 在本会话环境下无法启动窗口属环境限制，逻辑层已由上述实机测试覆盖。
 - **PLAN 更新：** M1 前三项勾选；§11 将「探测版本和编码器能力」拆分为版本（已勾选）与编码器能力（未勾选）；README M1 功能清单同步。
 - **剩余工作：** M1 其余项——编码器/滤镜能力检测、文件选择与拖放导入、FFprobe JSON 解析与流信息展示、探测失败可读错误、真实 MKV/MP4 验证。
 
