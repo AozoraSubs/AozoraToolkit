@@ -23,6 +23,8 @@ fn app_info() -> AppInfo {
 }
 
 /// 可执行文件所在目录（安装目录；开发时为 target 目录）。
+/// 仅 dev 构建使用（WebView2 数据目录），release 构建中无调用方。
+#[cfg_attr(not(dev), allow(dead_code))]
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()

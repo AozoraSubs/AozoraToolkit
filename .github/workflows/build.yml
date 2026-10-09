@@ -132,9 +132,18 @@ jobs:
 
       - name: Verify macOS bundle signature
         if: inputs.build_bundles == true && runner.os == 'macOS'
+        shell: bash
         run: |
-          codesign --verify --deep --strict --verbose=2 \
-            "src-tauri/target/release/bundle/macos/Aozora Encode.app"
+          # `tauri build --bundles dmg` 结束后 .app 已被清理，改为挂载 dmg 验证其中的 .app
+          DMG=$(find "src-tauri/target/release/bundle/dmg" -name '*.dmg' | head -n 1)
+          if [ -z "$DMG" ]; then
+            echo "未找到 dmg 产物"
+            exit 1
+          fi
+          MOUNT=$(mktemp -d)
+          hdiutil attach "$DMG" -mountpoint "$MOUNT" -quiet -nobrowse
+          codesign --verify --deep --strict --verbose=2 "$MOUNT/Aozora Encode.app"
+          hdiutil detach "$MOUNT" -quiet
 
       - name: Upload bundles
         if: inputs.build_bundles == true
