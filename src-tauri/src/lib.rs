@@ -31,6 +31,7 @@ fn exe_dir() -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 主窗口在配置中标记为 `create: false`，在此手动创建，
             // 以便 dev 构建指定可执行文件旁的 WebView2 数据目录。

@@ -1,7 +1,11 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type { ToolDetectionResult, ToolInfo } from "../types/tools";
+  import type {
+    CapabilityReport,
+    ToolDetectionResult,
+    ToolInfo,
+  } from "../types/tools";
   import { toolSourceLabel } from "../utils/toolSourceLabel";
 
   type AppInfo = {
@@ -11,6 +15,8 @@
 
   let appInfo = $state<AppInfo | null>(null);
   let detection = $state<ToolDetectionResult | null>(null);
+  let capabilities = $state<CapabilityReport | null>(null);
+  let capabilitiesError = $state<string | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
@@ -19,6 +25,17 @@
   const TOOLS: Array<{ id: "ffmpeg" | "ffprobe"; label: string }> = [
     { id: "ffmpeg", label: "FFmpeg" },
     { id: "ffprobe", label: "FFprobe" },
+  ];
+
+  const KNOWN_ENCODERS: Array<{
+    key: keyof CapabilityReport["encoders"];
+    label: string;
+  }> = [
+    { key: "libx264", label: "libx264（H.264 软件）" },
+    { key: "libx265", label: "libx265（HEVC 软件）" },
+    { key: "h264Nvenc", label: "h264_nvenc（NVIDIA H.264）" },
+    { key: "hevcNvenc", label: "hevc_nvenc（NVIDIA HEVC）" },
+    { key: "av1Nvenc", label: "av1_nvenc（NVIDIA AV1）" },
   ];
 
   async function refresh() {
@@ -32,6 +49,17 @@
       error = err instanceof Error ? err.message : String(err);
     } finally {
       busy = false;
+    }
+    await refreshCapabilities();
+  }
+
+  async function refreshCapabilities() {
+    capabilitiesError = null;
+    try {
+      capabilities = await invoke<CapabilityReport>("detect_capabilities");
+    } catch (err) {
+      capabilities = null;
+      capabilitiesError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -124,6 +152,38 @@
     </div>
   {/if}
 
+  <h2>编码器与滤镜能力</h2>
+
+  {#if capabilities}
+    <ul class="enc-list">
+      {#each KNOWN_ENCODERS as enc (enc.key)}
+        <li>
+          <span
+            class="status-mark"
+            class:ok={capabilities.encoders[enc.key]}
+            aria-hidden="true"
+          >
+            {capabilities.encoders[enc.key] ? "✓" : "✗"}
+          </span>
+          <span>{enc.label}</span>
+        </li>
+      {/each}
+    </ul>
+    <p class="hint small">
+      共 {capabilities.encoderCount} 个编码器、{capabilities.filterCount} 个滤镜可用。
+      {#if capabilities.hwAccels.length > 0}
+        硬件加速方法：{capabilities.hwAccels.join("、")}。
+      {/if}
+    </p>
+    {#each capabilities.warnings as warning (warning)}
+      <p class="error small">{warning}</p>
+    {/each}
+  {:else if capabilitiesError}
+    <p class="error" role="alert">{capabilitiesError}</p>
+  {:else}
+    <p class="hint small">能力检测尚未完成。</p>
+  {/if}
+
   <form class="custom-dir" onsubmit={saveCustomDir}>
     <label for="custom-dir">自定义 FFmpeg 目录（Windows）</label>
     <div class="row">
@@ -152,9 +212,8 @@
   {/if}
 
   <div class="placeholder">
-    <strong>即将实现（M1 后续）</strong>
+    <strong>即将实现（后续里程碑）</strong>
     <ul>
-      <li>编码器与滤镜能力检测</li>
       <li>主题与日志设置</li>
     </ul>
   </div>
@@ -321,5 +380,30 @@
 
   .notice {
     color: #1f9d55;
+  }
+
+  .enc-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 6px;
+    margin: 0 0 10px;
+    padding: 0;
+    list-style: none;
+    max-width: 720px;
+  }
+
+  .enc-list li {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+  }
+
+  .error.small {
+    font-size: 12px;
+    margin: 4px 0;
   }
 </style>
