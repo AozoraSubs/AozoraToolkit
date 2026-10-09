@@ -51,8 +51,9 @@
 
 ### M1 媒体探测
 
-- [ ] FFmpeg / FFprobe 安装检测（PATH → 安装目录 `bin` → 指定路径）与能力检测
-- [ ] 自定义 FFmpeg 实例路径
+- [x] FFmpeg / FFprobe 安装检测（PATH → 安装目录 `bin` → 指定路径）
+- [x] 自定义 FFmpeg 实例路径
+- [ ] 编码器与滤镜能力检测
 - [ ] 视频、音频、字幕流信息展示
 
 ### M2 单任务压制
@@ -109,7 +110,7 @@ pnpm run format:check # Prettier
 pnpm test             # Vitest
 ```
 
-Rust 检查（在 `src-tauri` 目录）：
+Rust 检查（在 `src-tauri` 目录；纯逻辑与测试位于 workspace 成员 `aozora-core`，不依赖 Tauri）：
 
 ```bash
 cargo fmt --check

@@ -33,9 +33,9 @@
 
 ### M1：媒体探测
 
-- [ ] FFmpeg / FFprobe 安装检测（检测顺序：运行环境 PATH → 工具箱安装目录下的 `bin` 文件夹 → 用户指定路径文件夹下的可执行文件；未安装时在 M1 阶段给出可读错误提示。平台差异：macOS / Linux 只检测 PATH 中的 `ffmpeg` / `ffprobe` 命令即可；「指定路径」只对 Windows 有意义，且在 M6 下载 FFmpeg 功能落地后更有用）
-- [ ] 自定义 FFmpeg 实例路径（用户手动指定自定义 FFmpeg / FFprobe 路径；Windows 下指向包含可执行文件的文件夹）
-- [ ] 检测 FFmpeg / FFprobe 版本
+- [x] FFmpeg / FFprobe 安装检测（检测顺序：运行环境 PATH → 工具箱安装目录下的 `bin` 文件夹 → 用户指定路径文件夹下的可执行文件；未安装时在 M1 阶段给出可读错误提示。平台差异：macOS / Linux 只检测 PATH 中的 `ffmpeg` / `ffprobe` 命令即可；「指定路径」只对 Windows 有意义，且在 M6 下载 FFmpeg 功能落地后更有用）
+- [x] 自定义 FFmpeg 实例路径（用户手动指定自定义 FFmpeg / FFprobe 路径；Windows 下指向包含可执行文件的文件夹）
+- [x] 检测 FFmpeg / FFprobe 版本
 - [ ] 检测实际可用的编码器与滤镜能力
 - [ ] 实现文件选择和拖放导入
 - [ ] 使用 FFprobe JSON 解析媒体信息
@@ -149,6 +149,17 @@
 - **验证方式：** 方案依据 Tauri 官方文档与社区验证过的配置；`codesign` 验证步骤将在下次 CI macOS 任务实际执行，本机（Windows）无法直接验证。
 - **PLAN 更新：** 无任务勾选变化；AGENTS.md 平台边界表述同步更新（ad-hoc 签名、不公证）。
 - **剩余工作：** 推送后从 GitHub 重新下载新版 dmg 验证；正式分发仍需 Apple Developer ID 签名 + 公证（付费开发者账号，不在当前范围）。
+
+### 2026-10-10（M1 首批）：FFmpeg / FFprobe 安装检测与自定义路径
+
+- **本次完成：** M1 前三项——安装检测、自定义实例路径、版本检测。新增 workspace 成员 `aozora-core`（纯逻辑、不依赖 Tauri，避免 Windows-GNU 下测试 exe 链接 WebView2 原生库失败）；`detect_tools` 命令按 PLAN 顺序检测（PATH → 安装目录 `bin` → 自定义路径，Windows 全顺序，macOS/Linux 仅 PATH），每个候选经 `-version` 实机验证并取版本横幅；设置持久化到 `app_config_dir()/settings.json`（`schemaVersion: 1`，含 `customToolDir`）；设置页展示检测结果（来源、路径、版本、可读错误）并支持保存/清除自定义路径。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（8 通过 / 2 ignored）全部通过。
+  - 实机检测（ignored 测试，本机 ffmpeg 9.0）：PATH 检测 + 版本横幅 ✓；注入真实 ffmpeg 目录验证 bin 分支（来源 `app_bin`）与自定义路径分支（来源 `custom`）✓。
+  - 前端：`pnpm run check`（0 错误）、`pnpm run lint`、`pnpm run format:check`、`pnpm test`（5/5）、`pnpm build` 全部通过。
+- **限制（如实记录）：** 本会话的 DSH 沙箱限制孙进程对 `%LOCALAPPDATA%` 等目录的访问，导致 WebView2 初始化失败（ERROR_BUSY / 拒绝访问；今天早些时候可正常运行的旧 release exe 同样复现，确认与本次代码无关）。因此**设置页 GUI 冒烟未能在本会话完成**，需在正常终端执行 `pnpm tauri dev` 人工验证界面；检测逻辑本身已由上述实机测试覆盖。
+- **PLAN 更新：** M1 前三项勾选；§11 将「探测版本和编码器能力」拆分为版本（已勾选）与编码器能力（未勾选）；README M1 功能清单同步。
+- **剩余工作：** M1 其余项——编码器/滤镜能力检测、文件选择与拖放导入、FFprobe JSON 解析与流信息展示、探测失败可读错误、真实 MKV/MP4 验证。
 
 ---
 
@@ -654,9 +665,10 @@ SQLite。第一版没有必要仅为了"专业架构"而先引入数据库。
 
 ### M1：媒体探测
 
--   [ ] 检测 FFmpeg/FFprobe 安装（顺序：PATH → 安装目录 `bin` → 指定路径；未安装给出错误提示；macOS/Linux 仅检测 PATH 命令，指定路径仅 Windows 使用）。
--   [ ] 自定义 FFmpeg/FFprobe 实例路径。
--   [ ] 探测版本和编码器能力。
+-   [x] 检测 FFmpeg/FFprobe 安装（顺序：PATH → 安装目录 `bin` → 指定路径；未安装给出错误提示；macOS/Linux 仅检测 PATH 命令，指定路径仅 Windows 使用）。
+-   [x] 自定义 FFmpeg/FFprobe 实例路径。
+-   [x] 探测版本。
+-   [ ] 探测编码器能力。
 -   [ ] 导入文件并显示流信息。
 
 **完成标准：** 常见 MKV/MP4 文件可正常探测，错误信息可读。
