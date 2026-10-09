@@ -90,6 +90,12 @@ jobs:
       - name: Build and bundle
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
+      - name: Verify macOS bundle signature
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --deep --strict --verbose=2 \
+            "src-tauri/target/release/bundle/macos/Aozora Encode.app"
+
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
