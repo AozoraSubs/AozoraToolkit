@@ -1,6 +1,6 @@
 [package]
 name = "aozora-encode"
-version = "0.1.0"
+version = "0.2.0"
 description = "A lightweight local-first video encoding toolbox"
 authors = ["Aozora Encode contributors"]
 edition = "2021"

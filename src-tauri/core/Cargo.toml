@@ -1,6 +1,6 @@
 [package]
 name = "aozora-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Aozora Encode 核心逻辑：设置模型与 FFmpeg / FFprobe 检测（不依赖 Tauri）"
 
