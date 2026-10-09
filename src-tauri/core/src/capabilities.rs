@@ -4,6 +4,7 @@ use std::process::Command;
 
 /// 应用关注的编码器是否可用。
 #[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KnownEncoders {
     pub libx264: bool,
     pub libx265: bool,
@@ -14,6 +15,7 @@ pub struct KnownEncoders {
 
 /// FFmpeg 能力检测结果。
 #[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CapabilityReport {
     pub encoders: KnownEncoders,
     pub encoder_count: usize,
@@ -175,6 +177,25 @@ mod tests {
         assert_eq!(
             parse_hw_accels(&lines),
             vec!["cuda".to_string(), "dxva2".to_string(), "qsv".to_string()]
+        );
+    }
+
+    /// 实机验证：仅在显式 `--ignored` 时运行，要求本机 PATH 中已安装 ffmpeg。
+    #[test]
+    #[ignore = "requires ffmpeg installed on PATH"]
+    fn detect_capabilities_real_ffmpeg() {
+        use crate::media_probe::find_in_path;
+        let path_entries: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        let ffmpeg =
+            find_in_path("ffmpeg", &path_entries).expect("ffmpeg 未在 PATH 中检测到");
+        let report = detect_capabilities(&ffmpeg);
+        assert!(report.encoder_count > 0, "编码器列表为空");
+        assert!(report.filter_count > 0, "滤镜列表为空");
+        assert!(
+            report.encoders.libx264,
+            "本机 ffmpeg 应包含 libx264（gyan 完整构建）"
         );
     }
 }

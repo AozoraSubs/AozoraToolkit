@@ -59,6 +59,7 @@ struct RawChapter {}
 // ---------- 面向 UI 的结果结构 ----------
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VideoStreamDto {
     pub index: u32,
     pub codec_name: String,
@@ -73,6 +74,7 @@ pub struct VideoStreamDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioStreamDto {
     pub index: u32,
     pub codec_name: String,
@@ -85,6 +87,7 @@ pub struct AudioStreamDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubtitleStreamDto {
     pub index: u32,
     pub codec_name: String,
