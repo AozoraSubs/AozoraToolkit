@@ -11,6 +11,12 @@ on:
   workflow_dispatch:
   # 供发布 / 周快照工作流复用（每次提交的构建验证仍然保留）
   workflow_call:
+    inputs:
+      ref:
+        description: '要构建的 Git 引用；留空使用触发提交'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -34,6 +40,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install Linux system dependencies (WebKitGTK etc.)
         if: runner.os == 'Linux'
