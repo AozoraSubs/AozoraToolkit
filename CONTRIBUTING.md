@@ -106,7 +106,7 @@ git diff --cached
 
 - pnpm 是本项目唯一受支持的 JavaScript 包管理器。
 - 在 `package.json` 的 `packageManager` 字段中固定 pnpm 版本；不要使用 `latest` 作为项目版本声明。
-- 提交 `pnpm-lock.yaml`，CI 使用 `pnpm install --frozen-lockfile`。
+- 提交 `pnpm-lock.yaml`；校验锁文件一致性时使用 `pnpm install --frozen-lockfile`。
 - 不提交 `package-lock.json`、`yarn.lock` 或 `npm-shrinkwrap.json`。
 - 优先复用现有依赖。
 - 引入新依赖前说明解决的问题、替代方案和维护成本。

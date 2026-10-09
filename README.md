@@ -33,7 +33,6 @@
 - **媒体探测与编码：** FFprobe / FFmpeg
 - **配置和预设：** JSON + Serde
 - **测试：** Rust 单元测试、前端测试、媒体集成测试
-- **CI：** GitHub Actions
 
 第一阶段不强制引入 SQLite、VapourSynth 或复杂状态管理库。只有当真实需求出现时再增加依赖。
 
@@ -101,7 +100,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-打包验证：
+打包验证（产出 Windows MSI 安装包，`bundle.targets` 仅保留 `msi`）：
 
 ```bash
 pnpm tauri build
