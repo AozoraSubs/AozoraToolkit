@@ -22,17 +22,17 @@ jobs:
       new_sha: ${{ steps.commit.outputs.new_sha }}
       skip_release: ${{ steps.check.outputs.skip_release }}
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Get base tag and check commits
+      - name: 获取基础标签并检查提交
         id: check
         run: |
           # 如果手动指定了基础标签，使用手动指定的
@@ -69,7 +69,7 @@ jobs:
             echo "skip_release=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate changelog (写入 CHANGELOG.md 并随版本提交)
+      - name: 生成变更日志（写入 CHANGELOG.md 并随版本提交）
         id: changelog
         if: steps.check.outputs.skip_release == 'false'
         run: |
@@ -79,11 +79,11 @@ jobs:
           fi
           node tools/generate-changelog.js $ARGS --output-only
 
-      - name: Update versions
+      - name: 更新版本号
         if: steps.check.outputs.skip_release == 'false'
         run: node tools/update-version.mjs "${{ github.event.inputs.version }}"
 
-      - name: Commit version update
+      - name: 提交版本更新
         id: commit
         if: steps.check.outputs.skip_release == 'false'
         run: |
@@ -114,18 +114,18 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repository (版本更新后的提交)
+      - name: 检出仓库（版本更新后的提交）
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.bump-version.outputs.new_sha }}
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Resolve base tag
+      - name: 解析基础标签
         id: base-tag
         run: |
           if [ -n "${{ github.event.inputs.base_tag }}" ]; then
@@ -140,7 +140,7 @@ jobs:
           fi
           echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Generate changelog
+      - name: 生成变更日志
         id: changelog
         run: |
           ARGS="--tag ${{ github.event.inputs.version }} --with-hash"
@@ -156,25 +156,25 @@ jobs:
 
           echo "$CHANGELOG_CONTENT"
 
-      - name: Download build artifacts (Windows)
+      - name: 下载构建产物（Windows）
         uses: actions/download-artifact@v4
         with:
           name: windows-msi
           path: artifacts/windows-msi
 
-      - name: Download build artifacts (macOS)
+      - name: 下载构建产物（macOS）
         uses: actions/download-artifact@v4
         with:
           name: macos-dmg
           path: artifacts/macos-dmg
 
-      - name: Download build artifacts (Linux)
+      - name: 下载构建产物（Linux）
         uses: actions/download-artifact@v4
         with:
           name: linux-deb-appimage
           path: artifacts/linux-deb-appimage
 
-      - name: Create Release
+      - name: 创建正式发布
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version }}

@@ -53,7 +53,7 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
 
-      - name: Install Linux system dependencies (WebKitGTK etc.)
+      - name: 安装 Linux 系统依赖（WebKitGTK 等）
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -68,53 +68,53 @@ jobs:
             wget \
             file
 
-      - name: Set up pnpm
+      - name: 安装 pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 11.24.0
           run_install: false
 
-      - name: Set up Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Set up Rust
+      - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust build artifacts
+      - name: 缓存 Rust 构建产物
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Install frontend dependencies
+      - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
-      - name: Frontend checks
+      - name: 前端检查
         run: |
           pnpm run check
           pnpm run lint
           pnpm run format:check
           pnpm test
 
-      - name: Rust checks
+      - name: Rust 检查
         working-directory: src-tauri
         run: |
           cargo fmt --check
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test
 
-      - name: Build and bundle
+      - name: 构建并打包
         if: inputs.build_bundles == true
         run: pnpm tauri build --bundles ${{ matrix.bundles }}
         env:
           # 周快照：把快照版本号编译进二进制（关于页展示），不修改任何版本文件
           AOZORA_SNAPSHOT_VERSION: ${{ inputs.snapshot_version }}
 
-      - name: Tag bundle file names with snapshot version
+      - name: 在产物文件名中标记快照版本
         if: inputs.build_bundles == true && inputs.snapshot_version != ''
         shell: bash
         run: |
@@ -130,7 +130,7 @@ jobs:
                 fi
               done
 
-      - name: Verify macOS bundle signature
+      - name: 验证 macOS 产物签名
         if: inputs.build_bundles == true && runner.os == 'macOS'
         shell: bash
         run: |
@@ -145,7 +145,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$MOUNT/Aozora Encode.app"
           hdiutil detach "$MOUNT" -quiet
 
-      - name: Upload bundles
+      - name: 上传产物
         if: inputs.build_bundles == true
         uses: actions/upload-artifact@v4
         with:

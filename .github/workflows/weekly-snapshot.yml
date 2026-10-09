@@ -23,17 +23,17 @@ jobs:
       base_tag: ${{ steps.gen.outputs.base_tag }}
       skip_release: ${{ steps.gen.outputs.skip_release }}
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Generate snapshot version
+      - name: 生成快照版本号
         id: gen
         run: |
           # 生成下一个周快照版本号
@@ -90,17 +90,17 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Generate changelog
+      - name: 生成变更日志
         id: changelog
         run: |
           VERSION=${{ needs.snapshot-version.outputs.version }}
@@ -122,25 +122,25 @@ jobs:
 
           echo "$CHANGELOG_CONTENT"
 
-      - name: Download build artifacts (Windows)
+      - name: 下载构建产物（Windows）
         uses: actions/download-artifact@v4
         with:
           name: windows-msi
           path: artifacts/windows-msi
 
-      - name: Download build artifacts (macOS)
+      - name: 下载构建产物（macOS）
         uses: actions/download-artifact@v4
         with:
           name: macos-dmg
           path: artifacts/macos-dmg
 
-      - name: Download build artifacts (Linux)
+      - name: 下载构建产物（Linux）
         uses: actions/download-artifact@v4
         with:
           name: linux-deb-appimage
           path: artifacts/linux-deb-appimage
 
-      - name: Create Pre-release
+      - name: 创建快照发布
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.snapshot-version.outputs.version }}
