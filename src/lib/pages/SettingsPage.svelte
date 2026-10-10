@@ -1,11 +1,12 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type {
-    CapabilityReport,
-    ToolDetectionResult,
-    ToolInfo,
-  } from "../types/tools";
+  import {
+    refreshCapabilities,
+    refreshDetection,
+    toolsState,
+  } from "../stores/tools.svelte";
+  import type { CapabilityReport, ToolInfo } from "../types/tools";
   import { toolSourceLabel } from "../utils/toolSourceLabel";
 
   type AppInfo = {
@@ -15,13 +16,15 @@
   };
 
   let appInfo = $state<AppInfo | null>(null);
-  let detection = $state<ToolDetectionResult | null>(null);
-  let capabilities = $state<CapabilityReport | null>(null);
-  let capabilitiesError = $state<string | null>(null);
-  let busy = $state(false);
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let customDirInput = $state("");
+
+  // 检测结果来自全局缓存：进入页面直接展示，不再重复探测
+  const detection = $derived(toolsState.detection);
+  const capabilities = $derived(toolsState.capabilities);
+  const capabilitiesError = $derived(toolsState.capabilitiesError);
+  const busy = $derived(toolsState.busy);
 
   const TOOLS: Array<{ id: "ffmpeg" | "ffprobe"; label: string }> = [
     { id: "ffmpeg", label: "FFmpeg" },
@@ -39,29 +42,14 @@
     { key: "av1Nvenc", label: "av1_nvenc（NVIDIA AV1）" },
   ];
 
-  async function refresh() {
-    busy = true;
+  async function refresh(force = true) {
     error = null;
     notice = null;
-    try {
-      detection = await invoke<ToolDetectionResult>("detect_tools");
-      customDirInput = detection.customToolDir ?? "";
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      busy = false;
+    await refreshDetection(force);
+    if (toolsState.detection) {
+      customDirInput = toolsState.detection.customToolDir ?? "";
     }
-    await refreshCapabilities();
-  }
-
-  async function refreshCapabilities() {
-    capabilitiesError = null;
-    try {
-      capabilities = await invoke<CapabilityReport>("detect_capabilities");
-    } catch (err) {
-      capabilities = null;
-      capabilitiesError = err instanceof Error ? err.message : String(err);
-    }
+    await refreshCapabilities(force);
   }
 
   async function saveCustomDir(event: Event) {
@@ -72,7 +60,8 @@
     try {
       await invoke("set_custom_tool_dir", { dir: dir === "" ? null : dir });
       notice = "自定义路径已保存";
-      await refresh();
+      // 路径变化后强制重新检测（缓存失效）
+      await refresh(true);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
@@ -88,7 +77,9 @@
     } catch {
       appInfo = null;
     }
-    await refresh();
+    // 首次进入使用缓存；没有缓存时才真正检测
+    await refreshDetection(false);
+    await refreshCapabilities(false);
   });
 </script>
 
@@ -198,7 +189,7 @@
         bind:value={customDirInput}
       />
       <button type="submit" disabled={busy}>保存</button>
-      <button type="button" onclick={refresh} disabled={busy}>
+      <button type="button" onclick={() => refresh(true)} disabled={busy}>
         {busy ? "检测中…" : "重新检测"}
       </button>
     </div>

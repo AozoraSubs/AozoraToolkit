@@ -1,6 +1,5 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { onDestroy, onMount } from "svelte";
@@ -11,29 +10,22 @@
     suggestOutputPath,
     validateVideoConfig,
   } from "../encoders";
+  import { jobState, resetJobUi, startJobUi } from "../stores/jobs.svelte";
+  import { refreshCapabilities, toolsState } from "../stores/tools.svelte";
   import type {
-    ActiveJobUi,
     EncodeConfig,
-    JobFinishedEvent,
-    JobLogEvent,
-    JobProgressEvent,
-    JobStartedEvent,
     SubtitleMode,
     VideoConfig,
   } from "../types/encode";
   import type { MediaProbeResult } from "../types/media";
-  import type { CapabilityReport } from "../types/tools";
   import { formatBytes, formatSeconds } from "../utils/format";
-
-  const MAX_LOG_LINES = 500;
 
   let info = $state<MediaProbeResult | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let dragging = $state(false);
 
-  // 编码能力与表单状态
-  let capabilities = $state<CapabilityReport | null>(null);
+  // 编码能力与表单状态（能力结果在全局缓存，避免反复探测）
   let video = $state<VideoConfig>(defaultVideoConfig("libx264"));
   let subtitleMode = $state<SubtitleMode>("drop");
   let outputPath = $state("");
@@ -42,11 +34,11 @@
   let previewArgs = $state<string[] | null>(null);
   let previewError = $state<string | null>(null);
 
-  // 任务状态
-  let job = $state<ActiveJobUi | null>(null);
-  let elapsed = $state(0);
+  // 任务状态来自全局 store：切页不丢进度
+  const job = $derived(jobState.job);
 
   const currentDefinition = $derived(encoderDefinition(video.encoderId));
+  const capabilities = $derived(toolsState.capabilities);
 
   function isAvailable(encoderId: string): boolean {
     if (!capabilities) {
@@ -70,8 +62,7 @@
   }
 
   function resetJob() {
-    job = null;
-    elapsed = 0;
+    resetJobUi();
     formError = null;
   }
 
@@ -169,24 +160,7 @@
       return;
     }
     formError = null;
-    job = {
-      id: "",
-      startedAt: Date.now(),
-      notice: null,
-      percent: 0,
-      outTimeSecs: 0,
-      durationKnown: info.durationSecs !== null,
-      durationSecs: info.durationSecs,
-      speed: null,
-      fps: null,
-      etaSecs: null,
-      logs: [],
-      finished: false,
-      status: null,
-      error: null,
-      outputPath: null,
-      elapsedSecs: 0,
-    };
+    startJobUi(info.durationSecs);
     try {
       const jobId = await invoke<string>("start_job", {
         config: buildConfig(),
@@ -194,8 +168,9 @@
         durationSecs: info.durationSecs,
       });
       // job:started 事件通常先到；这里兜底修正 ID
-      if (job && !job.id) {
-        job.id = jobId;
+      const current = jobState.job;
+      if (current && !current.id) {
+        current.id = jobId;
       }
     } catch (err) {
       resetJob();
@@ -204,115 +179,43 @@
   }
 
   async function cancelJob() {
-    if (!job || job.finished) {
+    const current = jobState.job;
+    if (!current || current.finished) {
       return;
     }
     try {
-      await invoke("cancel_job", { jobId: job.id });
+      await invoke("cancel_job", { jobId: current.id });
     } catch (err) {
       formError = err instanceof Error ? err.message : String(err);
     }
   }
 
-  const unlisteners: Array<() => void> = [];
+  let unlistenDragDrop: (() => void) | null = null;
 
   onMount(async () => {
-    unlisteners.push(
-      await getCurrentWebview().onDragDropEvent((event) => {
-        if (event.payload.type === "over") {
-          dragging = true;
-        } else if (event.payload.type === "drop") {
-          dragging = false;
-          const path = event.payload.paths[0];
-          if (path) {
-            void loadFile(path);
-          }
-        } else {
-          dragging = false;
+    unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === "over") {
+        dragging = true;
+      } else if (event.payload.type === "drop") {
+        dragging = false;
+        const path = event.payload.paths[0];
+        if (path) {
+          void loadFile(path);
         }
-      }),
-    );
-    unlisteners.push(
-      await listen<JobStartedEvent>("job:started", (event) => {
-        const payload = event.payload;
-        if (job) {
-          job.id = payload.jobId;
-          job.startedAt = Date.now();
-          job.notice = payload.notice;
-        }
-      }),
-    );
-    unlisteners.push(
-      await listen<JobProgressEvent>("job:progress", (event) => {
-        const payload = event.payload;
-        if (!job || job.id !== payload.jobId) {
-          return;
-        }
-        job.percent = payload.percent;
-        job.outTimeSecs = payload.outTimeSecs;
-        job.durationKnown = payload.durationKnown;
-        job.durationSecs = payload.durationSecs;
-        job.speed = payload.speed;
-        job.fps = payload.fps;
-        job.etaSecs = payload.etaSecs;
-      }),
-    );
-    unlisteners.push(
-      await listen<JobLogEvent>("job:log", (event) => {
-        const payload = event.payload;
-        if (!job || job.id !== payload.jobId) {
-          return;
-        }
-        if (job.logs.length >= MAX_LOG_LINES) {
-          job.logs.shift();
-        }
-        job.logs.push(payload.line);
-      }),
-    );
-    unlisteners.push(
-      await listen<JobFinishedEvent>("job:finished", (event) => {
-        const payload = event.payload;
-        if (!job || job.id !== payload.jobId) {
-          return;
-        }
-        job.finished = true;
-        job.status = payload.status;
-        job.error = payload.error;
-        job.outputPath = payload.outputPath;
-        job.elapsedSecs = payload.elapsedSecs;
-      }),
-    );
-
-    try {
-      capabilities = await invoke<CapabilityReport>("detect_capabilities");
-    } catch {
-      capabilities = null;
-    }
+      } else {
+        dragging = false;
+      }
+    });
+    // 能力检测结果全局缓存，只探测一次
+    void refreshCapabilities();
   });
 
   onDestroy(() => {
-    for (const unlisten of unlisteners) {
-      unlisten();
-    }
-  });
-
-  // 运行中每秒刷新已用时间
-  $effect(() => {
-    if (job && !job.finished) {
-      const active = job;
-      elapsed = 0;
-      const timer = setInterval(() => {
-        elapsed = (Date.now() - active.startedAt) / 1000;
-      }, 500);
-      return () => {
-        clearInterval(timer);
-        elapsed = (Date.now() - active.startedAt) / 1000;
-      };
-    }
+    unlistenDragDrop?.();
   });
 
   const shownElapsed = $derived(
-    job && job.finished ? job.elapsedSecs : elapsed,
+    job && job.finished ? job.elapsedSecs : jobState.elapsed,
   );
 
   function logText(): string {

@@ -1,9 +1,25 @@
 <script lang="ts">
+  import { listen } from "@tauri-apps/api/event";
+  import { onMount } from "svelte";
   import EncodePage from "./lib/pages/EncodePage.svelte";
   import JobsPage from "./lib/pages/JobsPage.svelte";
   import PresetsPage from "./lib/pages/PresetsPage.svelte";
   import SettingsPage from "./lib/pages/SettingsPage.svelte";
   import { navigation, type PageId } from "./lib/stores/navigation.svelte";
+  import {
+    jobState,
+    onJobFinished,
+    onJobLog,
+    onJobProgress,
+    onJobStarted,
+    tickElapsed,
+  } from "./lib/stores/jobs.svelte";
+  import type {
+    JobFinishedEvent,
+    JobLogEvent,
+    JobProgressEvent,
+    JobStartedEvent,
+  } from "./lib/types/encode";
 
   const pages: Array<{ id: PageId; label: string }> = [
     { id: "encode", label: "压制" },
@@ -11,6 +27,45 @@
     { id: "presets", label: "预设" },
     { id: "settings", label: "设置" },
   ];
+
+  // 任务事件在常驻的 App 组件中统一监听并写入全局状态，
+  // 页面切换不会丢失压制进度。
+  onMount(() => {
+    let unlisteners: Array<() => void> = [];
+    void (async () => {
+      unlisteners = [
+        await listen<JobStartedEvent>("job:started", (event) => {
+          onJobStarted(event.payload);
+        }),
+        await listen<JobProgressEvent>("job:progress", (event) => {
+          onJobProgress(event.payload);
+        }),
+        await listen<JobLogEvent>("job:log", (event) => {
+          onJobLog(event.payload);
+        }),
+        await listen<JobFinishedEvent>("job:finished", (event) => {
+          onJobFinished(event.payload);
+        }),
+      ];
+    })();
+    return () => {
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
+    };
+  });
+
+  // 运行中每 500ms 刷新已用时间
+  $effect(() => {
+    if (jobState.job && !jobState.job.finished) {
+      jobState.elapsed = 0;
+      const timer = setInterval(tickElapsed, 500);
+      return () => {
+        clearInterval(timer);
+        tickElapsed();
+      };
+    }
+  });
 </script>
 
 <div class="shell">
