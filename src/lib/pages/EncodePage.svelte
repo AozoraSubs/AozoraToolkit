@@ -5,41 +5,66 @@
   import { onDestroy, onMount } from "svelte";
   import {
     ENCODER_DEFINITIONS,
-    defaultVideoConfig,
     encoderDefinition,
     suggestOutputPath,
     validateVideoConfig,
   } from "../encoders";
-  import { jobState, resetJobUi, startJobUi } from "../stores/jobs.svelte";
+  import { copyName, presetEncoderAvailable } from "../presets";
+  import {
+    applyPreset,
+    buildEncodeConfig,
+    encodeForm,
+    loadInputFile,
+    resetVideoForEncoder,
+  } from "../stores/encodeForm.svelte";
+  import {
+    clearFinishedJob,
+    jobState,
+    removeQueuedJob,
+  } from "../stores/jobs.svelte";
+  import {
+    builtinPresets,
+    createPreset,
+    presetById,
+    refreshPresets,
+    userPresets,
+  } from "../stores/presets.svelte";
   import { refreshCapabilities, toolsState } from "../stores/tools.svelte";
-  import type {
-    EncodeConfig,
-    SubtitleMode,
-    VideoConfig,
-  } from "../types/encode";
-  import type { MediaProbeResult } from "../types/media";
+  import type { EnqueueResult } from "../types/encode";
+  import { copyText, formatCommandLine } from "../utils/command";
   import { formatBytes, formatSeconds } from "../utils/format";
 
-  let info = $state<MediaProbeResult | null>(null);
-  let busy = $state(false);
-  let error = $state<string | null>(null);
   let dragging = $state(false);
-
-  // 编码能力与表单状态（能力结果在全局缓存，避免反复探测）
-  let video = $state<VideoConfig>(defaultVideoConfig("libx264"));
-  let subtitleMode = $state<SubtitleMode>("drop");
-  let subtitlePath = $state("");
-  let outputPath = $state("");
-  let overwrite = $state(false);
   let formError = $state<string | null>(null);
   let previewArgs = $state<string[] | null>(null);
   let previewError = $state<string | null>(null);
+  let enqueueBusy = $state(false);
+  let notice = $state<string | null>(null);
 
-  // 任务状态来自全局 store：切页不丢进度
+  // 预设：应用已有预设 / 保存当前配置为新预设
+  let presetSelectId = $state("");
+  let saveOpen = $state(false);
+  let saveName = $state("");
+  let saveDescription = $state("");
+  let saveBusy = $state(false);
+  let saveError = $state<string | null>(null);
+
+  const info = $derived(encodeForm.info);
   const job = $derived(jobState.job);
-
-  const currentDefinition = $derived(encoderDefinition(video.encoderId));
+  const jobRunning = $derived(!!job && !job.finished);
   const capabilities = $derived(toolsState.capabilities);
+  const currentDefinition = $derived(
+    encoderDefinition(encodeForm.video.encoderId),
+  );
+  const queuedCount = $derived(jobState.queue.length);
+  const commandLine = $derived(
+    previewArgs
+      ? formatCommandLine(
+          toolsState.detection?.ffmpeg?.path ?? null,
+          previewArgs,
+        )
+      : "",
+  );
 
   function isAvailable(encoderId: string): boolean {
     if (!capabilities) {
@@ -52,19 +77,6 @@
     return capabilities.encoders[def.capabilityKey];
   }
 
-  function buildConfig(): EncodeConfig {
-    return {
-      schemaVersion: 1,
-      video,
-      audio: { mode: "copy" },
-      subtitles: {
-        mode: subtitleMode,
-        externalPath: subtitleMode === "burn" ? subtitlePath : null,
-      },
-      output: { path: outputPath, overwrite },
-    };
-  }
-
   async function pickSubtitleFile() {
     const selected = await open({
       multiple: false,
@@ -73,31 +85,19 @@
       filters: [{ name: "字幕文件", extensions: ["srt", "ass"] }],
     });
     if (typeof selected === "string") {
-      subtitlePath = selected;
+      encodeForm.subtitlePath = selected;
       await refreshPreview();
     }
   }
 
-  function resetJob() {
-    resetJobUi();
-    formError = null;
-  }
-
   async function loadFile(path: string) {
-    busy = true;
-    error = null;
-    resetJob();
+    notice = null;
+    clearFinishedJob();
     previewArgs = null;
     previewError = null;
-    try {
-      info = await invoke<MediaProbeResult>("probe_media_file", { path });
-      outputPath = suggestOutputPath(info.filePath);
+    const error = await loadInputFile(path);
+    if (!error) {
       await refreshPreview();
-    } catch (err) {
-      info = null;
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      busy = false;
     }
   }
 
@@ -131,29 +131,30 @@
   async function pickOutputPath() {
     const selected = await save({
       title: "选择输出位置",
-      defaultPath: outputPath || (info ? suggestOutputPath(info.filePath) : ""),
+      defaultPath:
+        encodeForm.outputPath || (info ? suggestOutputPath(info.filePath) : ""),
       filters: [{ name: "视频文件", extensions: ["mkv", "mp4"] }],
     });
     if (typeof selected === "string") {
-      outputPath = selected;
+      encodeForm.outputPath = selected;
       await refreshPreview();
     }
   }
 
   function onEncoderChange() {
-    video = defaultVideoConfig(video.encoderId);
+    resetVideoForEncoder(encodeForm.video.encoderId);
     void refreshPreview();
   }
 
   async function refreshPreview() {
     previewError = null;
-    if (!info || !outputPath.trim()) {
+    if (!info || !encodeForm.outputPath.trim()) {
       previewArgs = null;
       return;
     }
     try {
       previewArgs = await invoke<string[]>("preview_job_args", {
-        config: buildConfig(),
+        config: buildEncodeConfig(),
         inputPath: info.filePath,
       });
     } catch (err) {
@@ -162,40 +163,48 @@
     }
   }
 
-  async function startJob() {
-    if (!info || !outputPath.trim()) {
+  async function copyCommand() {
+    const ok = await copyText(commandLine);
+    notice = ok ? "已复制命令到剪贴板" : "复制失败：剪贴板不可用";
+  }
+
+  async function startEnqueue() {
+    if (!info || !encodeForm.outputPath.trim()) {
       formError = "请先导入输入文件并设置输出路径";
       return;
     }
-    const validationError = validateVideoConfig(video);
+    const validationError = validateVideoConfig(encodeForm.video);
     if (validationError) {
       formError = validationError;
       return;
     }
-    if (!isAvailable(video.encoderId)) {
-      formError = `当前 FFmpeg 构建不支持编码器 ${video.encoderId}`;
+    if (!isAvailable(encodeForm.video.encoderId)) {
+      formError = `当前 FFmpeg 构建不支持编码器 ${encodeForm.video.encoderId}`;
       return;
     }
-    if (subtitleMode === "burn" && !subtitlePath.trim()) {
+    if (encodeForm.subtitleMode === "burn" && !encodeForm.subtitlePath.trim()) {
       formError = "烧录字幕需要先选择外部字幕文件（srt / ass）";
       return;
     }
     formError = null;
-    startJobUi(info.durationSecs);
+    notice = null;
+    enqueueBusy = true;
     try {
-      const jobId = await invoke<string>("start_job", {
-        config: buildConfig(),
+      const result = await invoke<EnqueueResult>("enqueue_job", {
+        config: buildEncodeConfig(),
         inputPath: info.filePath,
         durationSecs: info.durationSecs,
       });
-      // job:started 事件通常先到；这里兜底修正 ID
-      const current = jobState.job;
-      if (current && !current.id) {
-        current.id = jobId;
+      if (!result.started) {
+        notice =
+          result.position !== null
+            ? `已加入队列（第 ${result.position} 位），当前任务完成后自动开始`
+            : "已加入队列，当前任务完成后自动开始";
       }
     } catch (err) {
-      resetJob();
       formError = err instanceof Error ? err.message : String(err);
+    } finally {
+      enqueueBusy = false;
     }
   }
 
@@ -208,6 +217,57 @@
       await invoke("cancel_job", { jobId: current.id });
     } catch (err) {
       formError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function removeQueued(jobId: string) {
+    try {
+      await removeQueuedJob(jobId);
+    } catch (err) {
+      formError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function applySelectedPreset() {
+    const preset = presetById(presetSelectId);
+    presetSelectId = "";
+    if (!preset) {
+      return;
+    }
+    applyPreset(preset);
+    notice = `已应用预设：${preset.name}`;
+    await refreshPreview();
+  }
+
+  async function savePreset() {
+    saveError = null;
+    const name = saveName.trim();
+    if (!name) {
+      saveError = "请填写预设名称";
+      return;
+    }
+    saveBusy = true;
+    try {
+      const preset = await createPreset({
+        name,
+        description: saveDescription.trim() || null,
+        video: { ...encodeForm.video },
+        audio: { mode: "copy" },
+        subtitles: {
+          mode: encodeForm.subtitleMode,
+          // 预设不保存字幕文件路径（与机器相关）
+          externalPath: null,
+        },
+        output: { overwrite: encodeForm.overwrite },
+      });
+      notice = `已保存预设：${preset.name}（可在「预设」页管理）`;
+      saveName = "";
+      saveDescription = "";
+      saveOpen = false;
+    } catch (err) {
+      saveError = err instanceof Error ? err.message : String(err);
+    } finally {
+      saveBusy = false;
     }
   }
 
@@ -227,8 +287,9 @@
         dragging = false;
       }
     });
-    // 能力检测结果全局缓存，只探测一次
+    // 能力检测与预设列表都在全局缓存，只读取一次
     void refreshCapabilities();
+    void refreshPresets();
   });
 
   onDestroy(() => {
@@ -239,15 +300,17 @@
     job && job.finished ? job.elapsedSecs : jobState.elapsed,
   );
 
-  function logText(): string {
-    return job?.logs.join("\n") ?? "";
+  function logText(lines: string[]): string {
+    return lines.join("\n");
   }
 </script>
 
 <section class="page">
   <header>
     <h1>压制</h1>
-    <p class="hint">选择输入文件、编码器与输出路径，开始压制任务。</p>
+    <p class="hint">
+      选择输入文件、编码器与输出路径；任务按队列逐个运行（同时只跑一个）。
+    </p>
   </header>
 
   <div
@@ -267,211 +330,292 @@
     <p class="dz-sub">或点击选择文件（MKV / MP4 / MOV 等）</p>
   </div>
 
-  {#if busy}
+  {#if encodeForm.busy}
     <p class="hint">正在探测媒体信息…</p>
   {/if}
 
-  {#if error}
+  {#if encodeForm.error}
     <div class="errors" role="alert">
       <strong>探测失败</strong>
-      <p>{error}</p>
+      <p>{encodeForm.error}</p>
     </div>
   {/if}
 
-  {#if info}
-    <section class="card">
-      <h2>编码设置</h2>
-      <div class="form-grid">
-        <label class="field">
-          <span class="field-label">视频编码器</span>
-          <select
-            bind:value={video.encoderId}
-            onchange={onEncoderChange}
-            disabled={!!job && !job.finished}
-          >
-            {#each ENCODER_DEFINITIONS as def (def.id)}
-              <option value={def.id} disabled={!isAvailable(def.id)}>
-                {def.label}{!isAvailable(def.id)
-                  ? "（当前 FFmpeg 不支持）"
-                  : ""}
-              </option>
-            {/each}
+  {#if notice}
+    <div class="notice" role="status">{notice}</div>
+  {/if}
+
+  <section class="card">
+    <h2>编码设置</h2>
+
+    <div class="form-grid">
+      <label class="field wide">
+        <span class="field-label">应用预设</span>
+        <div class="row">
+          <select bind:value={presetSelectId} onchange={applySelectedPreset}>
+            <option value="">（不使用预设）</option>
+            {#if builtinPresets().length > 0}
+              <optgroup label="内置预设">
+                {#each builtinPresets() as preset (preset.id)}
+                  <option
+                    value={preset.id}
+                    disabled={!presetEncoderAvailable(preset, capabilities)}
+                  >
+                    {preset.name}{!presetEncoderAvailable(preset, capabilities)
+                      ? "（当前 FFmpeg 不支持）"
+                      : ""}
+                  </option>
+                {/each}
+              </optgroup>
+            {/if}
+            {#if userPresets().length > 0}
+              <optgroup label="我的预设">
+                {#each userPresets() as preset (preset.id)}
+                  <option
+                    value={preset.id}
+                    disabled={!presetEncoderAvailable(preset, capabilities)}
+                  >
+                    {preset.name}
+                  </option>
+                {/each}
+              </optgroup>
+            {/if}
           </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label"
-            >质量（{currentDefinition?.qualityLabel}）</span
-          >
-          <input
-            type="number"
-            bind:value={video.qualityValue}
-            min={currentDefinition?.qualityRange[0]}
-            max={currentDefinition?.qualityRange[1]}
-            disabled={!!job && !job.finished}
-            onchange={() => void refreshPreview()}
-          />
-          {#if currentDefinition}
-            <span class="field-hint">
-              {currentDefinition.qualityRange[0]}–{currentDefinition
-                .qualityRange[1]}
-              ，不同编码器的数值不可直接比较
-            </span>
-          {/if}
-        </label>
-
-        <label class="field">
-          <span class="field-label">预设</span>
-          <select
-            bind:value={video.preset}
-            disabled={!!job && !job.finished}
-            onchange={() => void refreshPreview()}
-          >
-            {#each currentDefinition?.presets ?? [] as preset (preset)}
-              <option value={preset}>{preset}</option>
-            {/each}
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">像素格式</span>
-          <select
-            value={video.pixelFormat ?? ""}
-            disabled={!!job && !job.finished}
-            onchange={(e) => {
-              const value = e.currentTarget.value;
-              video.pixelFormat = value === "" ? null : value;
-              void refreshPreview();
+          <button
+            type="button"
+            onclick={() => {
+              saveOpen = !saveOpen;
+              if (saveOpen && !saveName) {
+                saveName = copyName(
+                  encodeForm.video.encoderId,
+                  builtinPresets()
+                    .concat(userPresets())
+                    .map((preset) => preset.name),
+                );
+              }
             }}
           >
-            {#each currentDefinition?.pixelFormats ?? [] as option (option.label)}
-              <option value={option.value ?? ""}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">字幕</span>
-          <select
-            bind:value={subtitleMode}
-            disabled={!!job && !job.finished}
-            onchange={() => void refreshPreview()}
-          >
-            <option value="drop">丢弃字幕</option>
-            <option value="copy">保留全部字幕轨</option>
-            <option
-              value="burn"
-              disabled={capabilities !== null &&
-                !capabilities.hasSubtitlesFilter}
-            >
-              烧录外部字幕（srt / ass）
-              {capabilities !== null && !capabilities.hasSubtitlesFilter
-                ? "（当前 FFmpeg 无 libass）"
-                : ""}
-            </option>
-          </select>
-          {#if subtitleMode === "burn"}
-            <span class="field-hint">字幕将被渲染进画面，成为视频的一部分</span>
-          {:else if info && info.subtitleStreams.length === 0}
-            <span class="field-hint">源文件无字幕轨</span>
-          {:else if subtitleMode === "copy" && /\.mp4$/i.test(outputPath)}
-            <span class="field-hint">
-              MP4 对字幕格式支持有限（仅 mov_text），建议使用 MKV
-            </span>
-          {/if}
-        </label>
-      </div>
-
-      {#if subtitleMode === "burn"}
-        <div class="form-grid">
-          <label class="field wide">
-            <span class="field-label">外部字幕文件</span>
-            <div class="row">
-              <input
-                type="text"
-                bind:value={subtitlePath}
-                placeholder="选择要烧录的字幕文件（.srt / .ass）"
-                disabled={!!job && !job.finished}
-                onchange={() => void refreshPreview()}
-              />
-              <button
-                type="button"
-                onclick={pickSubtitleFile}
-                disabled={!!job && !job.finished}
-              >
-                浏览…
-              </button>
-            </div>
-            {#if !subtitlePath.trim()}
-              <span class="field-hint">请选择字幕文件后再开始压制</span>
-            {/if}
-          </label>
+            保存为预设…
+          </button>
         </div>
-      {/if}
+        <span class="field-hint">
+          预设只包含编码参数，不含输入 /
+          输出路径；在「预设」页可以重命名、删除与导入导出。
+        </span>
+      </label>
+    </div>
 
+    {#if saveOpen}
+      <div class="form-grid save-preset">
+        <label class="field">
+          <span class="field-label">预设名称</span>
+          <input type="text" bind:value={saveName} maxlength="60" />
+        </label>
+        <label class="field">
+          <span class="field-label">描述（可选）</span>
+          <input type="text" bind:value={saveDescription} maxlength="200" />
+        </label>
+        <div class="field save-actions">
+          <button
+            type="button"
+            class="primary"
+            onclick={savePreset}
+            disabled={saveBusy}
+          >
+            {saveBusy ? "保存中…" : "保存预设"}
+          </button>
+          <button type="button" onclick={() => (saveOpen = false)}>取消</button>
+        </div>
+      </div>
+      {#if saveError}
+        <p class="form-error">{saveError}</p>
+      {/if}
+    {/if}
+
+    <div class="form-grid">
+      <label class="field">
+        <span class="field-label">视频编码器</span>
+        <select
+          bind:value={encodeForm.video.encoderId}
+          onchange={onEncoderChange}
+        >
+          {#each ENCODER_DEFINITIONS as def (def.id)}
+            <option value={def.id} disabled={!isAvailable(def.id)}>
+              {def.label}{!isAvailable(def.id) ? "（当前 FFmpeg 不支持）" : ""}
+            </option>
+          {/each}
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label"
+          >质量（{currentDefinition?.qualityLabel}）</span
+        >
+        <input
+          type="number"
+          bind:value={encodeForm.video.qualityValue}
+          min={currentDefinition?.qualityRange[0]}
+          max={currentDefinition?.qualityRange[1]}
+          onchange={() => void refreshPreview()}
+        />
+        {#if currentDefinition}
+          <span class="field-hint">
+            {currentDefinition.qualityRange[0]}–{currentDefinition
+              .qualityRange[1]}，不同编码器的数值不可直接比较
+          </span>
+        {/if}
+      </label>
+
+      <label class="field">
+        <span class="field-label">预设</span>
+        <select
+          bind:value={encodeForm.video.preset}
+          onchange={() => void refreshPreview()}
+        >
+          {#each currentDefinition?.presets ?? [] as preset (preset)}
+            <option value={preset}>{preset}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">像素格式</span>
+        <select
+          value={encodeForm.video.pixelFormat ?? ""}
+          onchange={(e) => {
+            const value = e.currentTarget.value;
+            encodeForm.video.pixelFormat = value === "" ? null : value;
+            void refreshPreview();
+          }}
+        >
+          {#each currentDefinition?.pixelFormats ?? [] as option (option.label)}
+            <option value={option.value ?? ""}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">字幕</span>
+        <select
+          bind:value={encodeForm.subtitleMode}
+          onchange={() => void refreshPreview()}
+        >
+          <option value="drop">丢弃字幕</option>
+          <option value="copy">保留全部字幕轨</option>
+          <option
+            value="burn"
+            disabled={capabilities !== null && !capabilities.hasSubtitlesFilter}
+          >
+            烧录外部字幕（srt / ass）
+            {capabilities !== null && !capabilities.hasSubtitlesFilter
+              ? "（当前 FFmpeg 无 libass）"
+              : ""}
+          </option>
+        </select>
+        {#if encodeForm.subtitleMode === "burn"}
+          <span class="field-hint">字幕将被渲染进画面，成为视频的一部分</span>
+        {:else if info && info.subtitleStreams.length === 0}
+          <span class="field-hint">源文件无字幕轨</span>
+        {:else if encodeForm.subtitleMode === "copy" && /\.mp4$/i.test(encodeForm.outputPath)}
+          <span class="field-hint">
+            MP4 对字幕格式支持有限（仅 mov_text），建议使用 MKV
+          </span>
+        {/if}
+      </label>
+    </div>
+
+    {#if encodeForm.subtitleMode === "burn"}
       <div class="form-grid">
         <label class="field wide">
-          <span class="field-label">输出路径</span>
+          <span class="field-label">外部字幕文件</span>
           <div class="row">
             <input
               type="text"
-              bind:value={outputPath}
-              placeholder="选择或输入输出文件路径（.mkv / .mp4）"
-              disabled={!!job && !job.finished}
+              bind:value={encodeForm.subtitlePath}
+              placeholder="选择要烧录的字幕文件（.srt / .ass）"
               onchange={() => void refreshPreview()}
             />
-            <button
-              type="button"
-              onclick={pickOutputPath}
-              disabled={!!job && !job.finished}
-            >
-              浏览…
-            </button>
+            <button type="button" onclick={pickSubtitleFile}>浏览…</button>
           </div>
-        </label>
-
-        <label class="field checkbox-field">
-          <span class="field-label">覆盖行为</span>
-          <label class="checkbox">
-            <input type="checkbox" bind:checked={overwrite} />
-            输出文件已存在时覆盖
-          </label>
+          {#if !encodeForm.subtitlePath.trim()}
+            <span class="field-hint">请选择字幕文件后再开始压制</span>
+          {/if}
         </label>
       </div>
+    {/if}
 
-      {#if previewArgs}
-        <details class="preview">
-          <summary>参数预览（{previewArgs.length} 项）</summary>
+    <div class="form-grid">
+      <label class="field wide">
+        <span class="field-label">输出路径</span>
+        <div class="row">
+          <input
+            type="text"
+            bind:value={encodeForm.outputPath}
+            placeholder="选择或输入输出文件路径（.mkv / .mp4）"
+            onchange={() => void refreshPreview()}
+          />
+          <button type="button" onclick={pickOutputPath}>浏览…</button>
+        </div>
+        {#if !info}
+          <span class="field-hint">导入输入文件后会自动建议输出路径</span>
+        {/if}
+      </label>
+
+      <label class="field checkbox-field">
+        <span class="field-label">覆盖行为</span>
+        <label class="checkbox">
+          <input type="checkbox" bind:checked={encodeForm.overwrite} />
+          输出文件已存在时覆盖
+        </label>
+      </label>
+    </div>
+
+    {#if previewArgs}
+      <details class="preview">
+        <summary>命令预览（{previewArgs.length} 项参数）</summary>
+        <div class="command-row">
+          <pre class="command-line">{commandLine}</pre>
+          <button type="button" onclick={copyCommand}>复制命令</button>
+        </div>
+        <p class="field-hint">
+          全部参数由应用自动生成（无用户自定义参数）；实际执行时 FFmpeg
+          先写入应用临时目录，成功后移动到输出路径。
+        </p>
+        <details class="args">
+          <summary>逐项参数</summary>
           <pre class="preview-args">{previewArgs.join("\n")}</pre>
         </details>
-      {/if}
-      {#if previewError}
-        <p class="form-error">参数预览失败：{previewError}</p>
-      {/if}
+      </details>
+    {/if}
+    {#if previewError}
+      <p class="form-error">参数预览失败：{previewError}</p>
+    {/if}
 
-      {#if formError}
-        <div class="errors" role="alert">
-          <strong>无法开始压制</strong>
-          <p>{formError}</p>
-        </div>
-      {/if}
-
-      <div class="actions">
-        <button
-          type="button"
-          class="primary"
-          onclick={startJob}
-          disabled={!!job && !job.finished}
-        >
-          {job && !job.finished ? "压制进行中…" : "开始压制"}
-        </button>
+    {#if formError}
+      <div class="errors" role="alert">
+        <strong>无法开始压制</strong>
+        <p>{formError}</p>
       </div>
-    </section>
-  {/if}
+    {/if}
+
+    <div class="actions">
+      <button
+        type="button"
+        class="primary"
+        onclick={startEnqueue}
+        disabled={enqueueBusy || !info || !encodeForm.outputPath.trim()}
+      >
+        {enqueueBusy ? "正在提交…" : jobRunning ? "加入队列" : "开始压制"}
+      </button>
+      {#if !info}
+        <span class="action-hint">请先导入输入文件</span>
+      {/if}
+    </div>
+  </section>
 
   {#if job && !job.finished}
     <section class="card">
-      <h2>压制进行中</h2>
+      <h2>压制进行中：{job.name}</h2>
       {#if job.notice}
         <div class="notice" role="status">{job.notice}</div>
       {/if}
@@ -500,6 +644,10 @@
           <dt>剩余时间</dt>
           <dd>{job.etaSecs !== null ? formatSeconds(job.etaSecs) : "—"}</dd>
         </div>
+        <div>
+          <dt>排队中</dt>
+          <dd>{queuedCount} 个任务</dd>
+        </div>
       </dl>
       <div class="actions">
         <button type="button" class="danger" onclick={cancelJob}
@@ -508,7 +656,7 @@
       </div>
       <details class="log">
         <summary>日志（{job.logs.length} 行）</summary>
-        <pre class="log-pre">{logText()}</pre>
+        <pre class="log-pre">{logText(job.logs)}</pre>
       </details>
     </section>
   {:else if job?.finished}
@@ -535,6 +683,11 @@
           <p>{job.error}</p>
         </div>
       {/if}
+      {#if job.historyError}
+        <div class="notice" role="status">
+          任务历史写入失败：{job.historyError}
+        </div>
+      {/if}
       <dl class="meta">
         <div>
           <dt>已用时间</dt>
@@ -542,12 +695,33 @@
         </div>
       </dl>
       <div class="actions">
-        <button type="button" onclick={resetJob}>清除结果</button>
+        <button type="button" onclick={clearFinishedJob}>清除结果</button>
       </div>
       <details class="log">
         <summary>日志（{job.logs.length} 行）</summary>
-        <pre class="log-pre">{logText()}</pre>
+        <pre class="log-pre">{logText(job.logs)}</pre>
       </details>
+    </section>
+  {/if}
+
+  {#if queuedCount > 0}
+    <section class="card">
+      <h2>队列（{queuedCount} 个任务等待运行）</h2>
+      <ol class="queue-list">
+        {#each jobState.queue as queued (queued.id)}
+          <li>
+            <span class="queue-name" title={queued.inputPath}
+              >{queued.name}</span
+            >
+            <span class="queue-target path" title={queued.outputPath}
+              >→ {queued.outputPath}</span
+            >
+            <button type="button" onclick={() => removeQueued(queued.id)}
+              >移除</button
+            >
+          </li>
+        {/each}
+      </ol>
     </section>
   {/if}
 
@@ -683,12 +857,12 @@
 
   {#if !info}
     <div class="placeholder">
-      <strong>单任务压制（M2）</strong>
+      <strong>M3：预设与队列</strong>
       <ul>
-        <li>x264 / x265 与可用 NVENC 编码器</li>
-        <li>质量、预设与像素格式选择</li>
-        <li>进度、速度、ETA 与日志</li>
-        <li>支持取消与失败诊断</li>
+        <li>预设保存 / 重命名 / 删除 / 导入导出（含内置示例预设）</li>
+        <li>任务队列：同时只运行一个任务，其余排队等待</li>
+        <li>任务历史持久化，失败任务可查看日志并载入配置重试</li>
+        <li>命令预览与一键复制</li>
       </ul>
     </div>
   {/if}
@@ -769,6 +943,18 @@
     margin-bottom: 12px;
   }
 
+  .save-preset {
+    padding: 10px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+  }
+
+  .save-actions {
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
   .field {
     display: flex;
     flex-direction: column;
@@ -805,7 +991,8 @@
     gap: 8px;
   }
 
-  .row input {
+  .row input,
+  .row select {
     flex: 1;
   }
 
@@ -823,7 +1010,13 @@
   .actions {
     display: flex;
     gap: 8px;
+    align-items: center;
     margin-top: 10px;
+  }
+
+  .action-hint {
+    font-size: 12px;
+    color: var(--color-text-secondary);
   }
 
   button {
@@ -858,10 +1051,36 @@
   }
 
   .preview summary,
-  .log summary {
+  .log summary,
+  .args summary {
     cursor: pointer;
     font-size: 13px;
     color: var(--color-text-secondary);
+  }
+
+  .command-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 8px;
+  }
+
+  .command-line {
+    flex: 1;
+    margin: 0;
+    padding: 10px;
+    max-height: 140px;
+    overflow: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-background);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .args {
+    margin-top: 8px;
   }
 
   .preview-args,
@@ -935,6 +1154,28 @@
     color: var(--color-text);
     font-size: 13px;
     word-break: break-all;
+  }
+
+  .queue-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+  }
+
+  .queue-list li {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .queue-name {
+    font-weight: 600;
+  }
+
+  .queue-target {
+    flex: 1;
+    color: var(--color-text-secondary);
   }
 
   .streams {

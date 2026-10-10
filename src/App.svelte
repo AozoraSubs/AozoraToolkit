@@ -11,7 +11,10 @@
     onJobFinished,
     onJobLog,
     onJobProgress,
+    onJobQueue,
     onJobStarted,
+    refreshHistory,
+    refreshQueue,
     tickElapsed,
   } from "./lib/stores/jobs.svelte";
   import type {
@@ -20,6 +23,7 @@
     JobProgressEvent,
     JobStartedEvent,
   } from "./lib/types/encode";
+  import type { QueueSnapshot } from "./lib/types/jobs";
 
   const pages: Array<{ id: PageId; label: string }> = [
     { id: "encode", label: "压制" },
@@ -29,7 +33,7 @@
   ];
 
   // 任务事件在常驻的 App 组件中统一监听并写入全局状态，
-  // 页面切换不会丢失压制进度。
+  // 页面切换不会丢失压制进度、队列与历史。
   onMount(() => {
     let unlisteners: Array<() => void> = [];
     void (async () => {
@@ -46,7 +50,13 @@
         await listen<JobFinishedEvent>("job:finished", (event) => {
           onJobFinished(event.payload);
         }),
+        await listen<QueueSnapshot>("job:queue", (event) => {
+          onJobQueue(event.payload);
+        }),
       ];
+      // 补齐监听建立之前的状态（历史与队列）
+      void refreshQueue();
+      void refreshHistory();
     })();
     return () => {
       for (const unlisten of unlisteners) {
