@@ -140,7 +140,10 @@ cargo test -p aozora-core -- --ignored   # 需要本机 ffmpeg/ffprobe；NVENC �
 pnpm tauri icon src-tauri/app-icon.png   # 更新源图后重新生成 src-tauri/icons/*
 ```
 
-该命令会同时产出 Android / iOS 资源，本项目不含移动端，生成后需删除 `src-tauri/icons/android` 与 `src-tauri/icons/ios`。前端页签图标 `public/favicon.png`（32×32）不在该命令范围内，需要用同一源图另存更新。
+该命令会同时产出 Android / iOS 资源，本项目不含移动端，生成后需删除 `src-tauri/icons/android` 与 `src-tauri/icons/ios`。以下前端资源不在该命令范围内，需用同一源图另存更新：
+
+- `public/favicon.png`：页签图标，32×32。
+- `src/lib/assets/brand-mark.png`：侧边栏品牌标识（`src/App.svelte` 引用），72×72（36 CSS px @2x），构建时由 Vite 内联进 JS。
 
 注意：项目使用 `tauri::generate_context!`，`tauri-build` 不会为 `bundle.icon` 输出 `cargo:rerun-if-changed`，因此只替换图标文件时 cargo 不会重新编译二进制（旧图标会继续留在产物里）。更新图标后需要触发一次重建，例如触碰 `src-tauri/tauri.conf.json` 或执行 `cargo clean -p aozora-encode`。
 
