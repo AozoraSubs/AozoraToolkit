@@ -96,18 +96,23 @@ pub enum AudioMode {
     Copy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitleConfig {
     /// `copy`：保留全部字幕轨（`-map 0:s? -c:s copy`）；
-    /// `drop`：丢弃字幕（`-sn`）。按轨精细映射属 M4。
+    /// `drop`：丢弃字幕（`-sn`）；
+    /// `burn`：把外部字幕文件（srt/ass）烧录进画面（libass 滤镜）。
     pub mode: SubtitleMode,
+    /// `burn` 模式下的外部字幕文件路径。旧版配置无此字段时按 None 处理。
+    #[serde(default)]
+    pub external_path: Option<PathBuf>,
 }
 
 impl Default for SubtitleConfig {
     fn default() -> Self {
         Self {
             mode: SubtitleMode::Drop,
+            external_path: None,
         }
     }
 }
@@ -117,7 +122,11 @@ impl Default for SubtitleConfig {
 pub enum SubtitleMode {
     Copy,
     Drop,
+    Burn,
 }
+
+/// 烧录模式支持的外部字幕扩展名。
+pub const BURN_SUBTITLE_EXTENSIONS: [&str; 2] = ["srt", "ass"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,9 +320,29 @@ pub fn validate_config(config: &EncodeConfig) -> Result<(), String> {
     match config.audio.mode {
         AudioMode::Copy => {}
     }
-    // 字幕模式目前仅两种取值（枚举），都合法；保留显式分支便于未来扩展。
+    // 字幕模式：burn 必须携带外部字幕文件且扩展名受支持
     match config.subtitles.mode {
         SubtitleMode::Copy | SubtitleMode::Drop => {}
+        SubtitleMode::Burn => {
+            let path = config
+                .subtitles
+                .external_path
+                .as_ref()
+                .ok_or_else(|| "烧录字幕需要选择外部字幕文件（srt / ass）".to_string())?;
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            match ext {
+                Some(e) if BURN_SUBTITLE_EXTENSIONS.contains(&e.as_str()) => {}
+                _ => {
+                    return Err(format!(
+                        "字幕文件扩展名必须是 .srt 或 .ass：{}",
+                        path.display()
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -412,7 +441,7 @@ mod tests {
             "json: {json}"
         );
         assert!(
-            json.contains("\"subtitles\":{\"mode\":\"drop\"}"),
+            json.contains(r#""subtitles":{"mode":"drop","externalPath":null}"#),
             "json: {json}"
         );
         let restored: EncodeConfig = serde_json::from_str(&json).unwrap();
@@ -435,5 +464,23 @@ mod tests {
         }"#;
         let config: EncodeConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.subtitles.mode, SubtitleMode::Drop);
+    }
+
+    #[test]
+    fn burn_requires_external_path_and_supported_extension() {
+        let mut config = EncodeConfig::default();
+        config.subtitles.mode = SubtitleMode::Burn;
+        let err = validate_config(&config).unwrap_err();
+        assert!(err.contains("外部字幕文件"), "error: {err}");
+
+        config.subtitles.external_path = Some(PathBuf::from("sub.vtt"));
+        let err = validate_config(&config).unwrap_err();
+        assert!(err.contains(".srt 或 .ass"), "error: {err}");
+
+        config.subtitles.external_path = Some(PathBuf::from(r"C:\字幕\sub.ass"));
+        assert!(validate_config(&config).is_ok());
+
+        config.subtitles.external_path = Some(PathBuf::from("sub.SRT"));
+        assert!(validate_config(&config).is_ok());
     }
 }

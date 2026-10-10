@@ -1,5 +1,6 @@
 use crate::jobs::{ActiveJob, JobFinishedDto, JobLogDto, JobProgressDto, JobStartedDto, JobState};
 use crate::settings;
+use aozora_core::capabilities;
 use aozora_core::diagnostics;
 use aozora_core::encode::{self, EncodeConfig};
 use aozora_core::job::{run_encode, EncodeEvent, EncodeRequest};
@@ -119,6 +120,26 @@ pub async fn start_job(
     let ffmpeg = detection.ffmpeg.ok_or_else(|| {
         "未检测到可用的 FFmpeg，无法开始压制。请安装 FFmpeg 或在设置中指定路径。".to_string()
     })?;
+
+    // 3.1 烧录字幕：检查外部字幕文件存在性 + FFmpeg 的 libass 滤镜能力
+    if config.subtitles.mode == encode::SubtitleMode::Burn {
+        let subtitle_path = config
+            .subtitles
+            .external_path
+            .as_ref()
+            .expect("validate_config 已保证存在");
+        if !subtitle_path.is_file() {
+            return Err(format!(
+                "字幕文件不存在或不是文件：{}",
+                subtitle_path.display()
+            ));
+        }
+        if !capabilities::has_filter(Path::new(&ffmpeg.path), "subtitles") {
+            return Err(
+                "当前 FFmpeg 构建不支持 subtitles 滤镜（libass），无法烧录字幕".to_string(),
+            );
+        }
+    }
 
     // 4. 生成参数数组与任务专属临时输出路径（应用自己的临时目录），
     //    并在启动前完成可写性探测：应用临时目录 + 最终输出目录。

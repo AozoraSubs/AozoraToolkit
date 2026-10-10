@@ -924,4 +924,83 @@ mod tests {
         }
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// 实机验证：外部字幕文件（SRT）烧录进画面（libass `subtitles` 滤镜）。
+    #[tokio::test]
+    #[ignore = "requires ffmpeg and ffprobe on PATH with libass"]
+    async fn encode_burns_external_subtitles() {
+        use crate::encode::SubtitleMode;
+        use crate::probe::probe_media;
+
+        let ffmpeg = ffmpeg_on_path();
+        let path_entries: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        let ffprobe = find_in_path("ffprobe", &path_entries).expect("ffprobe 未在 PATH 中检测到");
+
+        let dir = temp_dir("burn");
+        let input = dir.join("in.mkv");
+        generate_input(&ffmpeg, &input, 2);
+        // 含中文与括号的文件名，覆盖转义路径
+        let srt = dir.join("字幕 [外挂].srt");
+        std::fs::write(
+            &srt,
+            "1\r\n00:00:00,000 --> 00:00:02,000\r\n中文字幕 烧录测试\r\n",
+        )
+        .unwrap();
+
+        let mut config = config_for("libx264", "veryfast", 23);
+        config.subtitles.mode = SubtitleMode::Burn;
+        config.subtitles.external_path = Some(srt.clone());
+
+        let output = dir.join("out.mkv");
+        let temp = planner::temp_output_path(&dir, &output, "e-test-burn");
+        let args = planner::build_args(&config, &input, &temp).unwrap();
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = collect_events();
+
+        let result = run_encode(
+            EncodeRequest {
+                ffmpeg_path: ffmpeg.clone(),
+                args,
+                input_path: input.clone(),
+                temp_path: temp.clone(),
+                final_path: output.clone(),
+                overwrite: false,
+                duration_secs: None,
+                cancel: cancel_rx,
+            },
+            event_tx,
+        )
+        .await;
+
+        assert_eq!(
+            result.status,
+            EncodeStatus::Completed,
+            "烧录失败：{:?}",
+            result.error
+        );
+        assert!(output.is_file(), "输出不存在");
+        assert!(!temp.exists(), "临时文件未清理");
+
+        // libass 滤镜初始化日志证明字幕真实渲染，而非仅仅拼接参数
+        let events = all_events(&mut event_rx);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                EncodeEvent::Log(line) if line.contains("libass")
+            )),
+            "日志应包含 libass 滤镜初始化信息"
+        );
+
+        // 输出可探测且时长一致；烧录模式下输出不应含字幕轨
+        let out_info = probe_media(&ffprobe, &output).expect("输出探测失败");
+        assert!(
+            out_info.subtitle_streams.is_empty(),
+            "烧录模式不应保留字幕轨"
+        );
+        assert!(out_info.duration_secs.is_some_and(|d| d > 0.0));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

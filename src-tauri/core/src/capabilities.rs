@@ -20,6 +20,8 @@ pub struct CapabilityReport {
     pub encoders: KnownEncoders,
     pub encoder_count: usize,
     pub filter_count: usize,
+    /// 是否有 `subtitles` 滤镜（libass）——外部字幕烧录依赖它。
+    pub has_subtitles_filter: bool,
     pub hw_accels: Vec<String>,
     /// 非致命问题（例如某子命令失败），整体检测仍可用。
     pub warnings: Vec<String>,
@@ -125,7 +127,11 @@ pub fn detect_capabilities(ffmpeg_path: &Path) -> CapabilityReport {
     }
 
     match run_lines(ffmpeg_path, &["-hide_banner", "-filters"]) {
-        Ok(lines) => report.filter_count = parse_filter_names(&lines).len(),
+        Ok(lines) => {
+            let names = parse_filter_names(&lines);
+            report.filter_count = names.len();
+            report.has_subtitles_filter = names.iter().any(|n| n == "subtitles");
+        }
         Err(e) => report.warnings.push(format!("滤镜检测失败：{e}")),
     }
 
@@ -135,6 +141,13 @@ pub fn detect_capabilities(ffmpeg_path: &Path) -> CapabilityReport {
     }
 
     report
+}
+
+/// 检查 ffmpeg 是否包含指定滤镜（轻量单命令检测，供任务启动前使用）。
+pub fn has_filter(ffmpeg_path: &Path, filter: &str) -> bool {
+    run_lines(ffmpeg_path, &["-hide_banner", "-filters"])
+        .map(|lines| parse_filter_names(&lines).iter().any(|n| n == filter))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

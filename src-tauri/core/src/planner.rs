@@ -67,7 +67,7 @@ pub fn build_args(
     push(&mut args, "-c:a");
     push(&mut args, "copy");
 
-    // 字幕：按配置丢弃（-sn）或保留全部字幕轨（复制）。
+    // 字幕：按配置丢弃（-sn）、保留全部字幕轨（复制）或烧录外部字幕文件。
     // 附件流始终不映射；按轨精细映射属 M4。
     match config.subtitles.mode {
         encode::SubtitleMode::Copy => {
@@ -78,6 +78,17 @@ pub fn build_args(
         }
         encode::SubtitleMode::Drop => {
             push(&mut args, "-sn");
+        }
+        encode::SubtitleMode::Burn => {
+            // 烧录时丢弃视频内字幕轨，字幕由外部文件渲染进画面。
+            push(&mut args, "-sn");
+            let path = config
+                .subtitles
+                .external_path
+                .as_ref()
+                .ok_or_else(|| "烧录字幕需要选择外部字幕文件（srt / ass）".to_string())?;
+            push(&mut args, "-vf");
+            push(&mut args, burn_subtitle_filter(path));
         }
     }
 
@@ -92,6 +103,23 @@ pub fn build_args(
 
 fn push(args: &mut Vec<OsString>, value: impl Into<OsString>) {
     args.push(value.into());
+}
+
+/// 生成烧录外部字幕的滤镜图字符串。
+///
+/// libass 的 `subtitles` 滤镜同时支持 srt 与 ass。滤镜参数按
+/// `av_get_token` 规则转义：反斜杠统一为 `/`，`:`、`'` 用 `\` 转义，
+/// 并用单引号包裹整个文件名（避免 `,` `;` 被当作滤镜链分隔符）。
+pub fn burn_subtitle_filter(path: &Path) -> String {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    let mut escaped = String::with_capacity(raw.len() + 4);
+    for ch in raw.chars() {
+        if ch == ':' || ch == '\'' {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    format!("subtitles=filename='{escaped}'")
 }
 
 // ---------- 路径安全 ----------
@@ -383,6 +411,7 @@ mod tests {
         let mut config = x264_config(18, "slow");
         config.subtitles = SubtitleConfig {
             mode: SubtitleMode::Copy,
+            external_path: None,
         };
         let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
         let text: Vec<String> = args
@@ -399,6 +428,7 @@ mod tests {
         let mut config = x264_config(18, "slow");
         config.subtitles = SubtitleConfig {
             mode: SubtitleMode::Drop,
+            external_path: None,
         };
         let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
         let text: Vec<String> = args
@@ -408,6 +438,40 @@ mod tests {
         let joined = text.join(" ");
         assert!(joined.contains("-sn"), "args: {joined}");
         assert!(!joined.contains("-c:s"), "args: {joined}");
+    }
+
+    #[test]
+    fn subtitle_burn_mode_adds_escaped_filter_and_drops_packaged() {
+        let mut config = x264_config(18, "slow");
+        config.subtitles = SubtitleConfig {
+            mode: SubtitleMode::Burn,
+            external_path: Some(PathBuf::from(r"C:\字幕 目录\样片 [01].ass")),
+        };
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
+        let text: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = text.join(" ");
+        assert!(joined.contains("-sn"), "args: {joined}");
+        assert!(!joined.contains("-map 0:s?"), "args: {joined}");
+        let vf_index = text.iter().position(|a| a == "-vf").expect("应有 -vf");
+        let filter = &text[vf_index + 1];
+        assert!(
+            filter.starts_with("subtitles=filename='"),
+            "filter: {filter}"
+        );
+        // 冒号被转义、反斜杠统一为斜杠、空格/括号/中文保留
+        assert!(
+            filter.contains(r"C\:/字幕 目录/样片 [01].ass"),
+            "filter: {filter}"
+        );
+    }
+
+    #[test]
+    fn burn_subtitle_filter_escapes_special_chars() {
+        let filter = burn_subtitle_filter(Path::new(r"C:\dir\sub's title.ass"));
+        assert_eq!(filter, r"subtitles=filename='C\:/dir/sub\'s title.ass'");
     }
 
     #[test]
