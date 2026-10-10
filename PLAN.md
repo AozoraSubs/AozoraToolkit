@@ -299,6 +299,23 @@
 - **PLAN 更新：** M3 清单 9 项、实施进度总览 M3 与 §11 M3 勾选；README M3 功能清单同步；§8 数据布局补充内置预设不落盘的实现差异；§6.4 补充回退成品路径按任务 ID 唯一化。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（品牌资源）：应用图标替换为项目图标
+
+- **本次完成：** 用户提供的 `icon.png`（1080×1080、透明圆角方形、深色底 `At` 字样）替换全部应用图标资源。
+  1. 源图入库为 `src-tauri/app-icon.png`（原临时放在仓库根目录，移入 `src-tauri` 并以 Tauri 约定的 `app-icon` 命名，便于后续重新生成）。
+  2. `pnpm tauri icon src-tauri/app-icon.png` 重新生成 `src-tauri/icons/*`：`icon.ico`（16/24/32/48/64/256 六种尺寸，Windows 可执行文件资源与窗口 / 任务栏图标）、`icon.icns`、`32x32/64x64/128x128/128x128@2x/icon.png`、Windows Store `Square*Logo` 与 `StoreLogo`。
+  3. 该命令默认还会产出 Android / iOS 资源；移动端不在项目范围内，已删除 `src-tauri/icons/android` 与 `src-tauri/icons/ios`，未入库。
+  4. 前端页签图标 `public/favicon.png` 由同一源图另存为 32×32（该文件不在 `tauri icon` 的生成范围内）。
+- **验证方式与结果（全部实际执行）：**
+  - 图标内容比对：用 Pillow 把生成结果与源图逐一比对（原图像素差异 + 缩小到 8×8 的结构差异）——`32x32/64x64/128x128/128x128@2x/icon.png`、`StoreLogo`、`Square150x150Logo`、`icon.ico` 的最大尺寸项（256）与最小尺寸项（16）全部通过（结构差异 ≤ 5，逐像素差异为不同重采样算法造成的边缘噪声）；`icon.icns` 头部为 `icns` 魔数、111,740 字节。验证脚本为一次性脚本，未入库。
+  - exe 内嵌资源比对：解析 `target/debug/aozora-encode.exe` 的 PE 资源目录，`RT_ICON`（id 1–6）六个尺寸与 `icon.ico` 的同尺寸数据 **SHA-256 全部一致**（594 / 928 / 1319 / 1994 / 2750 / 8992 字节），`RT_GROUP_ICON` 为 90 字节图标组。
+  - 实机外观：`pnpm tauri dev` 启动后对窗口做 `PrintWindow` 抓图，标题栏图标为新的深青底 `At` 标识。
+  - 前端：`pnpm run format:check`（通过，新增 PNG 未触发格式问题）、`pnpm run lint`（退出码 0）、`pnpm run check`（0 错误 0 警告）。
+- **构建注意（本次实测发现）：** 本项目用 `tauri::generate_context!` 而非 `tauri_build::CodegenContext`，`tauri-build` 不会为 `bundle.icon` 输出 `cargo:rerun-if-changed`——只改图标文件时 cargo **不会**重编二进制（实测 `cargo run` 0.5 秒完成、exe 哈希不变）。需要在改动图标后触发一次重建（例如触碰 `src-tauri/tauri.conf.json` 或 `cargo clean -p aozora-encode`），否则 dev / 打包产物仍带旧图标。首次全新构建无此问题。
+- **限制（如实记录）：** 本次未重新执行 MSI 打包（`pnpm tauri build`），安装包与快捷方式图标沿用同一 `icon.ico`，未做打包产物验证；任务栏 / 开始菜单图标未单独截图确认（与标题栏同源）。
+- **PLAN 更新：** 无清单勾选变化（图标资源不属于 M4/M5 现有条目）；README「本地开发」新增应用图标与重新生成说明。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
