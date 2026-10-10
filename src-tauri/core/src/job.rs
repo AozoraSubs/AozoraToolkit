@@ -2,7 +2,7 @@
 //! 取消与临时输出收尾。只依赖 tokio，不依赖 Tauri。
 
 use crate::progress::{ProgressParser, ProgressRecord};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -43,7 +43,7 @@ pub enum EncodeEvent {
 }
 
 /// 任务最终状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EncodeStatus {
     Completed,
