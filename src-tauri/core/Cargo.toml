@@ -1,6 +1,6 @@
 [package]
 name = "aozora-core"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Aozora Toolbox 核心逻辑：设置模型与 FFmpeg / FFprobe 检测（不依赖 Tauri）"
 
