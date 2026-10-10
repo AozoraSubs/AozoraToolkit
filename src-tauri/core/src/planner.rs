@@ -133,6 +133,45 @@ pub fn check_paths(input: &Path, output: &Path, overwrite: bool) -> Result<(), S
     Ok(())
 }
 
+/// 启动前探测输出位置是否可写：以写模式创建（或截断）目标文件后立即删除。
+///
+/// FFmpeg 遇到权限问题时只报 `Permission denied`（退出码 -13），无法区分
+/// "目录不可写"与"同名文件被占用/只读"；这里提前探测并给出可读原因，
+/// 让用户在任务开始前就知道问题所在。
+pub fn verify_writable(target: &Path) -> Result<(), String> {
+    let existed = target.exists();
+    let result = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(target);
+    match result {
+        Ok(file) => {
+            drop(file);
+            // 探测文件用完即删，不留下垃圾（FFmpeg 稍后会重新创建）。
+            let _ = std::fs::remove_file(target);
+            Ok(())
+        }
+        Err(e) => {
+            let parent = target
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "（未知目录）".to_string());
+            if existed {
+                Err(format!(
+                    "无法覆盖已存在的文件（{}）：{e}。文件可能被其他程序占用、为只读属性，或目录权限不足",
+                    target.display()
+                ))
+            } else {
+                Err(format!(
+                    "输出目录不可写（{parent}）：{e}。请检查目录权限、杀毒软件或\"受控文件夹访问\"设置",
+                ))
+            }
+        }
+    }
+}
+
 /// 判断输入与输出是否指向同一文件（规范化绝对路径比较；输出可能尚不存在）。
 pub fn same_file(input: &Path, output: &Path) -> bool {
     match (canonicalish(input), canonicalish(output)) {
@@ -301,6 +340,39 @@ mod tests {
         let output = dir.join("output.mkv");
         assert!(check_paths(&input, &output, false).is_ok());
         assert!(check_paths(&input, &output, true).is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn verify_writable_creates_and_removes_probe_file() {
+        let dir = temp_dir("writable");
+        let target = dir.join("probe.mkv");
+        assert!(verify_writable(&target).is_ok());
+        assert!(!target.exists(), "探测文件应被删除");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn verify_writable_reports_missing_directory() {
+        let dir = temp_dir("unwritable");
+        let err = verify_writable(&dir.join("no-such-dir").join("probe.mkv")).unwrap_err();
+        assert!(err.contains("输出目录不可写"), "error: {err}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verify_writable_reports_readonly_existing_file() {
+        let dir = temp_dir("readonly");
+        let target = dir.join("probe.mkv");
+        fs::write(&target, "旧内容").unwrap();
+        // 只读属性：Windows 下写入打开失败（EACCES）
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&target, permissions).unwrap();
+        let err = verify_writable(&target).unwrap_err();
+        assert!(err.contains("无法覆盖已存在的文件"), "error: {err}");
+        fs::remove_file(&target).ok();
         fs::remove_dir_all(&dir).ok();
     }
 

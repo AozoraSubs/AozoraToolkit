@@ -186,6 +186,16 @@
 - **PLAN 更新：** M2 全部 12 项勾选；§11 M2 子项勾选；实施进度总览 M2 勾选；README M2 清单勾选。
 - **剩余工作：** 进入 M3（预设与队列）：预设 JSON 持久化/导入导出、队列与任务历史、命令预览与复制。
 
+### 2026-10-10（M2 修复）：输出权限问题的快速失败与诊断
+
+- **本次完成：** 用户反馈压制失败（`FFmpeg 退出码：exit code: 0xfffffff3`，`Error opening output … Permission denied`）。本地复现确认 0xFFFFFFF3 即 -13（EACCES，只读文件/目录无写权限时的 FFmpeg 退出码）。修复：`planner::verify_writable` 在任务启动前以写模式创建并删除探测文件，把"目录不可写"与"已有文件被占用/只读"区分成可读错误，任务不再带着必然失败进入 FFmpeg；`describe_exit` 解码负 errno 退出码（-13 权限不足 / -2 路径不存在）；失败摘要含 `Permission denied` 时追加排查提示（目录权限、杀毒软件、受控文件夹访问、文件占用/只读）。
+- **验证方式与结果（全部实际执行）：**
+  - 本地复现：只读文件 → ffmpeg 退出 0xFFFFFFF3（-13）✓；不存在的目录 → 0xFFFFFFFE（-2）✓，与用户日志一致。
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（49 单元，含 3 个新的 `verify_writable` 用例：可写创建+删除、目录缺失、Windows 只读文件拒绝）、集成测试 9/9 全部通过。
+- **限制：** 用户环境（`Downloads\yt-dlp_win_x86\Disp\output`）的写入权限无法在本会话直接检查；修复后用户再次运行会在开始前看到精确原因（目录不可写 / 文件被占用 / 只读）。
+- **PLAN 更新：** 无清单勾选变化（M2 缺陷修复）。
+- **剩余工作：** 同 M2 记录；如新报错仍指向目录 ACL/受控文件夹访问，需用户检查该目录权限或更换输出目录。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱

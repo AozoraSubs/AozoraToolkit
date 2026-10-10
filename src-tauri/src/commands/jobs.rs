@@ -73,9 +73,11 @@ pub async fn start_job(
         "未检测到可用的 FFmpeg，无法开始压制。请安装 FFmpeg 或在设置中指定路径。".to_string()
     })?;
 
-    // 4. 生成参数数组与任务专属临时输出路径
+    // 4. 生成参数数组与任务专属临时输出路径；启动前探测输出位置可写，
+    //    把"权限不足"类问题在开始任务前以可读方式报告给用户。
     let job_id = next_job_id();
     let temp_path = planner::temp_output_path(&output, &job_id);
+    planner::verify_writable(&temp_path)?;
     let args = planner::build_args(&config, &input, &temp_path)?;
 
     // 5. 注册活动任务

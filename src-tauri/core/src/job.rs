@@ -129,10 +129,24 @@ fn tail_summary(log_tail: &VecDeque<String>) -> String {
     lines.join(" | ")
 }
 
-/// 可读的退出结果描述。
+/// 可读的退出结果描述。Windows 下 FFmpeg 会以负 errno 退出
+/// （如权限不足为 -13，显示为 exit code: 0xfffffff3），这里解码常见值。
 fn describe_exit(exit: &Result<std::process::ExitStatus, std::io::Error>) -> String {
     match exit {
-        Ok(status) => format!("退出码：{status}"),
+        Ok(status) => {
+            let base = format!("退出码：{status}");
+            match status.code() {
+                Some(code) if code < 0 => {
+                    let hint = match code {
+                        -13 => "（权限不足：输出目录不可写，或目标文件被占用/只读）",
+                        -2 => "（路径不存在）",
+                        _ => "（负 errno，见上方错误详情）",
+                    };
+                    format!("{base}（{code}）{hint}")
+                }
+                _ => base,
+            }
+        }
         Err(e) => format!("等待进程退出失败：{e}"),
     }
 }
@@ -317,13 +331,17 @@ pub async fn run_encode(
         }
         EncodeStatus::Failed => {
             let _ = std::fs::remove_file(&request.temp_path);
+            let summary = tail_summary(&log_tail);
+            let mut error = format!("FFmpeg {}。{}", describe_exit(&exit), summary);
+            // FFmpeg 对权限问题只报 "Permission denied"，补充可操作的排查提示。
+            if summary.contains("Permission denied") || summary.contains("Access is denied") {
+                error.push_str(
+                    "。提示：输出目录可能无写入权限、目标文件被其他程序占用或为只读，也可能被杀毒软件或“受控文件夹访问”拦截",
+                );
+            }
             EncodeResult {
                 status: EncodeStatus::Failed,
-                error: Some(format!(
-                    "FFmpeg {}。{}",
-                    describe_exit(&exit),
-                    tail_summary(&log_tail)
-                )),
+                error: Some(error),
                 output_path: None,
                 last_progress,
                 elapsed: started.elapsed(),
