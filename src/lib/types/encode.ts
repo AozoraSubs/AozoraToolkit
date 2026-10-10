@@ -2,6 +2,7 @@ import type { KnownEncoders } from "./tools";
 
 export type QualityMode = "crf" | "cq";
 export type AudioMode = "copy";
+export type SubtitleMode = "copy" | "drop";
 
 export interface VideoConfig {
   encoderId: string;
@@ -15,6 +16,11 @@ export interface AudioConfig {
   mode: AudioMode;
 }
 
+export interface SubtitleConfig {
+  /** copy：保留全部字幕轨；drop：丢弃字幕。 */
+  mode: SubtitleMode;
+}
+
 export interface OutputConfig {
   path: string;
   overwrite: boolean;
@@ -25,6 +31,7 @@ export interface EncodeConfig {
   schemaVersion: 1;
   video: VideoConfig;
   audio: AudioConfig;
+  subtitles: SubtitleConfig;
   output: OutputConfig;
 }
 

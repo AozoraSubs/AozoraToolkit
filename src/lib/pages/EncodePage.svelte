@@ -18,6 +18,7 @@
     JobLogEvent,
     JobProgressEvent,
     JobStartedEvent,
+    SubtitleMode,
     VideoConfig,
   } from "../types/encode";
   import type { MediaProbeResult } from "../types/media";
@@ -34,6 +35,7 @@
   // 编码能力与表单状态
   let capabilities = $state<CapabilityReport | null>(null);
   let video = $state<VideoConfig>(defaultVideoConfig("libx264"));
+  let subtitleMode = $state<SubtitleMode>("drop");
   let outputPath = $state("");
   let overwrite = $state(false);
   let formError = $state<string | null>(null);
@@ -62,6 +64,7 @@
       schemaVersion: 1,
       video,
       audio: { mode: "copy" },
+      subtitles: { mode: subtitleMode },
       output: { path: outputPath, overwrite },
     };
   }
@@ -422,6 +425,25 @@
             {/each}
           </select>
         </label>
+
+        <label class="field">
+          <span class="field-label">字幕</span>
+          <select
+            bind:value={subtitleMode}
+            disabled={!!job && !job.finished}
+            onchange={() => void refreshPreview()}
+          >
+            <option value="drop">丢弃字幕</option>
+            <option value="copy">保留全部字幕轨</option>
+          </select>
+          {#if info && info.subtitleStreams.length === 0}
+            <span class="field-hint">源文件无字幕轨</span>
+          {:else if subtitleMode === "copy" && /\.mp4$/i.test(outputPath)}
+            <span class="field-hint">
+              MP4 对字幕格式支持有限（仅 mov_text），建议使用 MKV
+            </span>
+          {/if}
+        </label>
       </div>
 
       <div class="form-grid">
@@ -690,7 +712,8 @@
         </table>
       {/if}
       <p class="hint">
-        M2 说明：音频全部复制原音轨，字幕与章节暂不处理（M4 实现）。
+        说明：音频全部复制原音轨；字幕可选保留（复制全部字幕轨）或丢弃；章节与附件暂不处理（M4
+        实现）。
       </p>
     </section>
   {/if}
