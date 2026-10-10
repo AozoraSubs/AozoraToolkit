@@ -1,15 +1,11 @@
-<img src="assets/icon.png" align="center" style="max-width: 100%;">
-
-
 <div align="center">
-   <img width="160" src="assets/icon.png" alt="logo"></br>
+   <img width="160" src="assets/icon.png" alt="logo"><br>
    <h1>Aozora Toolbox</h1>
-----
+</div>
 
 Aozora Toolbox 是一个现代、轻量、以本地处理为核心的视频压制工具箱。
 
-</div>
-
+> 项目状态：规划 / 初期开发阶段。当前文档描述目标，不代表所有功能已经实现。
 
 ## 目标
 

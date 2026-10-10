@@ -335,6 +335,18 @@
 - **PLAN 更新：** 无清单勾选变化；README 补充「产品名与内部标识」说明并修正 macOS `.app` 名称；本记录新增。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（文档修复）：README 顶部结构
+
+- **本次完成：** 按用户要求只修 README 顶部（其余两项保留，见下）。
+  1. 删除开头重复的全宽 `<img src="assets/icon.png" align="center" style="max-width: 100%;">`（同一张 logo 在居中的 `div` 里已有一份，且该标签未闭合）。
+  2. `----` → 结束居中 `div`：Markdown 的 `---`/`----` 分隔线在 HTML 块内不会被解析（会按字面文本显示），原本夹在 `<div align="center">` 与 `</div>` 之间；现在居中块只包含 logo 与标题，随后直接接简介段落。
+  3. `</br>` → `<br>`（HTML5 中 `br` 是空元素，`</br>` 不是合法写法）。
+  4. 恢复被这次改版删掉的引用块「> 项目状态：规划 / 初期开发阶段……」——该说明仍符合当前状态（M4 未完成），且 PLAN/README 口径需要一致；如不需要可随时删除。
+- **验证方式与结果：** `pnpm exec prettier --check README.md`（通过）；标题层级、代码围栏配对（10 个标记）、相对链接（AGENTS.md / CONTRIBUTING.md / PLAN.md / docs/architecture.md）逐项核对正常。文档改动不涉及代码，未重跑代码检查。
+- **保留未处理（按用户指示）：** `docs/architecture.md` 仍未入库（其中 ADR-007 的 NSIS 表述与 macOS/Linux 构建描述同 AGENTS.md / CI 现状不一致）；`src-tauri/target/release/bundle/msi/` 下的历史 MSI 未清理。
+- **PLAN 更新：** 本记录新增；无清单勾选变化。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
