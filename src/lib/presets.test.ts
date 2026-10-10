@@ -1,6 +1,7 @@
 import { builtinPresetFixture, presetFixture } from "./testFixtures";
 import {
   copyName,
+  matchesPreset,
   presetEncoderAvailable,
   presetFileName,
   presetSummary,
@@ -89,5 +90,53 @@ describe("presetFileName", () => {
       "a_b_c_d_e_f_g_h_i_j.json",
     );
     expect(presetFileName("   ")).toBe("preset.json");
+  });
+});
+
+describe("matchesPreset", () => {
+  it("detects an unmodified preset application", () => {
+    const preset = presetFixture();
+    expect(matchesPreset(preset, { ...preset.video }, "drop", false)).toBe(
+      true,
+    );
+  });
+
+  it("reports modifications of any preset field", () => {
+    const preset = presetFixture();
+    expect(
+      matchesPreset(
+        preset,
+        { ...preset.video, qualityValue: 20 },
+        "drop",
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      matchesPreset(
+        preset,
+        { ...preset.video, encoderId: "libx264" },
+        "drop",
+        false,
+      ),
+    ).toBe(false);
+    expect(matchesPreset(preset, { ...preset.video }, "copy", false)).toBe(
+      false,
+    );
+    expect(matchesPreset(preset, { ...preset.video }, "drop", true)).toBe(
+      false,
+    );
+  });
+
+  it("ignores fields a preset does not store", () => {
+    const preset = presetFixture();
+    // 像素格式在预设中有值，必须参与比较；外部字幕文件路径不参与
+    expect(
+      matchesPreset(
+        preset,
+        { ...preset.video, pixelFormat: null },
+        "drop",
+        false,
+      ),
+    ).toBe(false);
   });
 });

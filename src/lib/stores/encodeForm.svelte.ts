@@ -20,6 +20,8 @@ export const encodeForm = $state<{
   subtitlePath: string;
   outputPath: string;
   overwrite: boolean;
+  /** 当前表单来源的预设 ID；参数被手动修改后仍然保留，由界面标注"已修改"。 */
+  appliedPresetId: string | null;
 }>({
   info: null,
   busy: false,
@@ -29,6 +31,7 @@ export const encodeForm = $state<{
   subtitlePath: "",
   outputPath: "",
   overwrite: false,
+  appliedPresetId: null,
 });
 
 /** 由当前表单构造编码配置。 */
@@ -91,6 +94,7 @@ export function applyPreset(preset: Preset): void {
     encodeForm.subtitlePath = "";
   }
   encodeForm.overwrite = preset.output.overwrite;
+  encodeForm.appliedPresetId = preset.id;
   if (!encodeForm.outputPath.trim() && encodeForm.info) {
     encodeForm.outputPath = suggestOutputPath(encodeForm.info.filePath);
   }
@@ -110,6 +114,8 @@ export async function loadFromJobRecord(
   encodeForm.subtitlePath = config.subtitles.externalPath ?? "";
   encodeForm.outputPath = config.output.path;
   encodeForm.overwrite = config.output.overwrite;
+  // 参数来自任务历史，不是某个预设
+  encodeForm.appliedPresetId = null;
   if (probeError) {
     return `输入文件无法读取，请重新选择：${probeError}`;
   }

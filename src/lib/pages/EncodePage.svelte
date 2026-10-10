@@ -9,7 +9,7 @@
     suggestOutputPath,
     validateVideoConfig,
   } from "../encoders";
-  import { copyName, presetEncoderAvailable } from "../presets";
+  import { copyName, matchesPreset, presetEncoderAvailable } from "../presets";
   import {
     applyPreset,
     buildEncodeConfig,
@@ -42,7 +42,6 @@
   let notice = $state<string | null>(null);
 
   // 预设：应用已有预设 / 保存当前配置为新预设
-  let presetSelectId = $state("");
   let saveOpen = $state(false);
   let saveName = $state("");
   let saveDescription = $state("");
@@ -57,6 +56,21 @@
     encoderDefinition(encodeForm.video.encoderId),
   );
   const queuedCount = $derived(jobState.queue.length);
+  const selectedPreset = $derived(
+    encodeForm.appliedPresetId
+      ? presetById(encodeForm.appliedPresetId)
+      : undefined,
+  );
+  // 参数被手动改过时只做标注，不清空选择（用户仍能看到起点是哪个预设）
+  const presetModified = $derived(
+    !!selectedPreset &&
+      !matchesPreset(
+        selectedPreset,
+        encodeForm.video,
+        encodeForm.subtitleMode,
+        encodeForm.overwrite,
+      ),
+  );
   const commandLine = $derived(
     previewArgs
       ? formatCommandLine(
@@ -228,16 +242,22 @@
     }
   }
 
+  /**
+   * 应用预设：选择框保留并显示所选预设（即"当前参数来自哪个预设"），
+   * 参数随后被手动修改时只在下拉框下方标注，不再用另一个提示框重复说明。
+   */
   async function applySelectedPreset(event: Event) {
     // 直接读取选择框的值，不依赖 bind 与 onchange 的触发顺序
     const select = event.currentTarget as HTMLSelectElement;
     const preset = presetById(select.value);
-    presetSelectId = "";
     if (!preset) {
+      // 选择"（不使用预设）"：仅清除来源标记，参数保持不变
+      encodeForm.appliedPresetId = null;
+      await refreshPreview();
       return;
     }
     applyPreset(preset);
-    notice = `已应用预设：${preset.name}`;
+    notice = null;
     await refreshPreview();
   }
 
@@ -354,7 +374,10 @@
       <label class="field wide">
         <span class="field-label">应用预设</span>
         <div class="row">
-          <select bind:value={presetSelectId} onchange={applySelectedPreset}>
+          <select
+            value={encodeForm.appliedPresetId ?? ""}
+            onchange={applySelectedPreset}
+          >
             <option value="">（不使用预设）</option>
             {#if builtinPresets().length > 0}
               <optgroup label="内置预设">
@@ -404,6 +427,13 @@
           预设只包含编码参数，不含输入 /
           输出路径；在「预设」页可以重命名、删除与导入导出。
         </span>
+        {#if selectedPreset}
+          <span class="field-hint">
+            当前参数来自预设「{selectedPreset.name}」{presetModified
+              ? "，已在下方手动修改"
+              : ""}
+          </span>
+        {/if}
       </label>
     </div>
 

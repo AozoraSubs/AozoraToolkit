@@ -1,4 +1,5 @@
 import { encoderDefinition } from "./encoders";
+import type { SubtitleMode, VideoConfig } from "./types/encode";
 import type { Preset, PresetInput } from "./types/preset";
 import type { CapabilityReport } from "./types/tools";
 
@@ -43,6 +44,28 @@ export function presetToInput(preset: Preset, name: string): PresetInput {
     subtitles: { mode: preset.subtitles.mode, externalPath: null },
     output: { overwrite: preset.output.overwrite },
   };
+}
+
+/**
+ * 当前表单参数是否仍与预设一致（用于在下拉框旁标注"参数已修改"）。
+ *
+ * 只比较预设实际保存的字段：输入 / 输出路径与外部字幕文件不属于预设。
+ */
+export function matchesPreset(
+  preset: Preset,
+  video: VideoConfig,
+  subtitleMode: SubtitleMode,
+  overwrite: boolean,
+): boolean {
+  return (
+    video.encoderId === preset.video.encoderId &&
+    video.qualityMode === preset.video.qualityMode &&
+    video.qualityValue === preset.video.qualityValue &&
+    video.preset === preset.video.preset &&
+    video.pixelFormat === preset.video.pixelFormat &&
+    subtitleMode === preset.subtitles.mode &&
+    overwrite === preset.output.overwrite
+  );
 }
 
 /**
