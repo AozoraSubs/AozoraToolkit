@@ -84,7 +84,7 @@
     <div class="brand">
       <img class="brand-mark" src={brandMark} alt="" />
       <div>
-        <div class="brand-name">Aozora Encode</div>
+        <div class="brand-name">Aozora Toolbox</div>
         <div class="brand-sub">本地视频压制工具箱</div>
       </div>
     </div>
@@ -105,7 +105,7 @@
         </li>
       {/each}
     </ul>
-    <div class="sidebar-foot">本地优先 · 离线处理</div>
+    <div class="sidebar-foot">Copyright 2026 AozoraSubs</div>
   </nav>
 
   <main class="content">
