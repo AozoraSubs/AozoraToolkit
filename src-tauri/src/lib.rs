@@ -59,8 +59,19 @@ pub fn run() {
             commands::probe::probe_media_file,
             commands::settings::set_custom_tool_dir,
             commands::jobs::preview_job_args,
-            commands::jobs::start_job,
-            commands::jobs::cancel_job
+            commands::jobs::enqueue_job,
+            commands::jobs::cancel_job,
+            commands::jobs::remove_queued_job,
+            commands::jobs::queue_snapshot,
+            commands::presets::list_presets,
+            commands::presets::create_preset,
+            commands::presets::rename_preset,
+            commands::presets::delete_preset,
+            commands::presets::import_preset_file,
+            commands::presets::export_preset_file,
+            commands::history::list_job_history,
+            commands::history::delete_job_history,
+            commands::history::clear_job_history
         ])
         .manage(jobs::JobState::default())
         .run(tauri::generate_context!())

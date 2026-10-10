@@ -5,26 +5,42 @@ use tauri::AppHandle;
 
 pub use aozora_core::settings::validate_tool_dir;
 
-/// dev 构建：配置放在可执行文件旁的 `config/`（本机从工作区启动的进程
-/// 无法写 %APPDATA%，见 PLAN 完成记录）。
+/// 应用配置根目录（PLAN §8：settings.json / presets / history 都在这里）。
+///
+/// - dev 构建：可执行文件旁的 `config/`（本机从工作区启动的进程无法写
+///   `%APPDATA%`，见 PLAN 完成记录）；
+/// - 发布构建：系统应用配置目录 `%APPDATA%\com.aozora.encode`。
 #[cfg(dev)]
-fn settings_path(_app: &AppHandle) -> Result<PathBuf, String> {
+pub fn config_dir(_app: &AppHandle) -> Result<PathBuf, String> {
     let exe_dir = std::env::current_exe()
         .map_err(|e| format!("无法确定程序目录：{e}"))?
         .parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| "无法确定程序目录".to_string())?;
-    Ok(exe_dir.join("config").join("settings.json"))
+    Ok(exe_dir.join("config"))
 }
 
-/// 发布构建：配置放在系统应用配置目录（%APPDATA%\com.aozora.encode）。
+/// 发布构建的配置根目录（见 [`config_dir`]）。
 #[cfg(not(dev))]
-fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     app.path()
         .app_config_dir()
-        .map(|dir| dir.join("settings.json"))
         .map_err(|e| format!("无法获取配置目录：{e}"))
+}
+
+fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_dir(app)?.join("settings.json"))
+}
+
+/// 用户预设目录（`<配置根目录>/presets`）。
+pub fn presets_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_dir(app)?.join("presets"))
+}
+
+/// 任务历史文件（`<配置根目录>/history/jobs.json`）。
+pub fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_dir(app)?.join("history").join("jobs.json"))
 }
 
 /// 读取设置；文件不存在时返回默认值。未知 schema 版本返回可读错误。

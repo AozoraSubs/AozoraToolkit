@@ -1,17 +1,32 @@
-use crate::jobs::{ActiveJob, JobFinishedDto, JobLogDto, JobProgressDto, JobStartedDto, JobState};
+//! 压制命令层：任务入队、队列调度、取消与命令预览。
+//!
+//! 调度模型（PLAN §4.3）：同一时刻只运行一个编码任务，其余任务排队；
+//! 每次入队与每个任务结束后调用 [`pump`] 尝试启动下一个任务。
+//! 所有校验与路径规划都在**入队时**完成，用户能立刻看到必然失败的原因。
+
+use crate::jobs::{
+    EnqueueResultDto, JobFinishedDto, JobLogDto, JobProgressDto, JobStartedDto, JobState,
+    PreparedJob,
+};
 use crate::settings;
 use aozora_core::capabilities;
 use aozora_core::diagnostics;
 use aozora_core::encode::{self, EncodeConfig};
+use aozora_core::history::{truncate_log_tail, HistoryStore, JobRecord};
 use aozora_core::job::{run_encode, EncodeEvent, EncodeRequest};
 use aozora_core::media_probe;
 use aozora_core::planner;
+use aozora_core::queue::{JobMeta, QueueSnapshot};
+use aozora_core::unix_now_ms;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, watch};
 
 static JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// 转发给前端的日志尾部保留行数（用于写入任务历史）。
+const LOG_TAIL_KEEP: usize = 400;
 
 /// 压制临时目录：FFmpeg 先写入这里，成功后移动/复制到最终输出。
 ///
@@ -85,43 +100,28 @@ pub fn preview_job_args(config: EncodeConfig, input_path: String) -> Result<Vec<
         .collect())
 }
 
-/// 启动一个压制任务（异步命令：仅完成校验与调度，编码在后台任务中运行）。
-#[tauri::command]
-pub async fn start_job(
-    app: AppHandle,
-    state: State<'_, JobState>,
+/// 入队前的完整准备：配置与路径校验、FFmpeg 解析、烧录字幕能力检查、
+/// 参数生成与临时/最终输出路径规划。
+fn prepare_job(
+    app: &AppHandle,
     config: EncodeConfig,
     input_path: String,
     duration_secs: Option<f64>,
-) -> Result<String, String> {
-    // 1. M2 单任务限制
-    {
-        let active = state
-            .active
-            .lock()
-            .map_err(|_| "任务状态锁失效".to_string())?;
-        if let Some(job) = active.as_ref() {
-            return Err(format!(
-                "已有任务正在运行（{}）。请先取消或等待其完成。",
-                job.id
-            ));
-        }
-    }
-
-    // 2. 配置与路径校验（在启动子进程前完成，避免必然失败的任务）
+) -> Result<PreparedJob, String> {
+    // 1. 配置与路径校验（在启动子进程前完成，避免必然失败的任务）
     encode::validate_config(&config)?;
     let input = PathBuf::from(&input_path);
     let output = config.output.path.clone();
     planner::check_paths(&input, &output, config.output.overwrite)?;
 
-    // 3. 解析当前生效的 FFmpeg
-    let settings = settings::load(&app)?;
+    // 2. 解析当前生效的 FFmpeg
+    let settings = settings::load(app)?;
     let detection = media_probe::detect_tools(&settings);
     let ffmpeg = detection.ffmpeg.ok_or_else(|| {
         "未检测到可用的 FFmpeg，无法开始压制。请安装 FFmpeg 或在设置中指定路径。".to_string()
     })?;
 
-    // 3.1 烧录字幕：检查外部字幕文件存在性 + FFmpeg 的 libass 滤镜能力
+    // 2.1 烧录字幕：检查外部字幕文件存在性 + FFmpeg 的 libass 滤镜能力
     if config.subtitles.mode == encode::SubtitleMode::Burn {
         let subtitle_path = config
             .subtitles
@@ -141,18 +141,17 @@ pub async fn start_job(
         }
     }
 
-    // 4. 生成参数数组与任务专属临时输出路径（应用自己的临时目录），
-    //    并在启动前完成可写性探测：应用临时目录 + 最终输出目录。
-    //    目标目录不可写时（例如受限/沙箱环境）回退到应用临时目录，
-    //    保证压制始终可以完成，并通过 notice 明确告知用户成品位置。
+    // 3. 生成任务专属临时输出路径（应用自己的临时目录），并在启动前完成
+    //    可写性探测：应用临时目录 + 最终输出目录。目标目录不可写时
+    //    （例如受限/沙箱环境）回退到应用临时目录，保证压制始终可以完成，
+    //    并通过 notice 明确告知用户成品位置。
     let job_id = next_job_id();
-    let temp_dir = encode_temp_dir(&app)?;
+    let temp_dir = encode_temp_dir(app)?;
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("创建压制临时目录失败（{}）：{e}", temp_dir.display()))?;
-    planner::clean_stale_temp_files(&temp_dir);
     let temp_path = planner::temp_output_path(&temp_dir, &output, &job_id);
     planner::verify_writable(&temp_path)?;
-    let (final_path, fallback_notice, overwrite) =
+    let (final_path, notice, overwrite) =
         match planner::verify_destination_writable(&output, &job_id) {
             Ok(()) => (output.clone(), None, config.output.overwrite),
             Err(destination_error) => {
@@ -177,107 +176,243 @@ pub async fn start_job(
         };
     let args = planner::build_args(&config, &input, &temp_path)?;
 
-    // 5. 注册活动任务
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    {
-        let mut active = state
-            .active
-            .lock()
-            .map_err(|_| "任务状态锁失效".to_string())?;
-        *active = Some(ActiveJob {
-            id: job_id.clone(),
-            cancel_tx,
-        });
-    }
-
-    // 6. 事件转发：运行器事件 → Tauri 事件
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<EncodeEvent>();
-    let forward_app = app.clone();
-    let forward_job_id = job_id.clone();
-    let forwarder = tauri::async_runtime::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            match event {
-                EncodeEvent::Log(line) => {
-                    let _ = forward_app.emit(
-                        "job:log",
-                        JobLogDto {
-                            job_id: forward_job_id.clone(),
-                            line,
-                        },
-                    );
-                }
-                EncodeEvent::Progress(snapshot) => {
-                    let _ = forward_app.emit(
-                        "job:progress",
-                        JobProgressDto::new(&forward_job_id, &snapshot),
-                    );
-                }
-            }
-        }
-    });
-
-    // 7. 后台运行；等待转发完成后再发 finished，保证事件顺序
-    let run_app = app.clone();
-    let run_active = state.active.clone();
-    let run_id = job_id.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = run_encode(
-            EncodeRequest {
-                ffmpeg_path: PathBuf::from(&ffmpeg.path),
-                args,
-                input_path: input,
-                temp_path,
-                final_path,
-                overwrite,
-                duration_secs,
-                cancel: cancel_rx,
-            },
-            event_tx,
-        )
-        .await;
-        let _ = forwarder.await;
-
-        if let Ok(mut active) = run_active.lock() {
-            if active.as_ref().map(|job| job.id == run_id).unwrap_or(false) {
-                *active = None;
-            }
-        }
-        let _ = run_app.emit(
-            "job:finished",
-            JobFinishedDto {
-                job_id: run_id,
-                status: result.status,
-                error: result.error,
-                output_path: result.output_path.map(|p| p.display().to_string()),
-                elapsed_secs: result.elapsed.as_secs_f64(),
-            },
-        );
-    });
-
-    let _ = app.emit(
-        "job:started",
-        JobStartedDto {
-            job_id: job_id.clone(),
-            notice: fallback_notice,
+    let name = input
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| job_id.clone());
+    Ok(PreparedJob {
+        meta: JobMeta {
+            id: job_id,
+            name,
+            input_path,
+            output_path: output.display().to_string(),
+            queued_at_ms: unix_now_ms(),
         },
-    );
-    Ok(job_id)
+        config,
+        duration_secs,
+        ffmpeg_path: PathBuf::from(&ffmpeg.path),
+        args,
+        input_path: input,
+        temp_path,
+        final_path,
+        overwrite,
+        notice,
+    })
+}
+
+/// 入队一个压制任务：校验与准备立即执行，随后在队列空闲时启动。
+#[tauri::command]
+pub async fn enqueue_job(
+    app: AppHandle,
+    state: State<'_, JobState>,
+    config: EncodeConfig,
+    input_path: String,
+    duration_secs: Option<f64>,
+) -> Result<EnqueueResultDto, String> {
+    let prepared = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            prepare_job(&app, config, input_path, duration_secs)
+        })
+        .await
+        .map_err(|e| format!("后台任务执行失败：{e}"))??
+    };
+
+    let job_id = prepared.meta.id.clone();
+    state.enqueue(prepared.meta.clone())?;
+    state.store_prepared(prepared);
+
+    let started = pump(&app, &state);
+    emit_queue(&app, &state);
+    let position = if started {
+        None
+    } else {
+        state.position(&job_id)
+    };
+    Ok(EnqueueResultDto {
+        job_id,
+        started,
+        position,
+    })
 }
 
 /// 请求取消正在运行的任务；最终状态由运行器置为 Cancelled。
 #[tauri::command]
 pub fn cancel_job(state: State<'_, JobState>, job_id: String) -> Result<(), String> {
-    let active = state
-        .active
-        .lock()
-        .map_err(|_| "任务状态锁失效".to_string())?;
-    let job = active
-        .as_ref()
-        .ok_or_else(|| "当前没有正在运行的任务".to_string())?;
-    if job.id != job_id {
-        return Err(format!("任务 {job_id} 不存在或已结束"));
+    state.cancel(&job_id)
+}
+
+/// 移除排队中的任务（运行中的任务需要取消）。
+#[tauri::command]
+pub fn remove_queued_job(
+    app: AppHandle,
+    state: State<'_, JobState>,
+    job_id: String,
+) -> Result<(), String> {
+    state.remove_queued(&job_id)?;
+    emit_queue(&app, &state);
+    Ok(())
+}
+
+/// 当前队列快照（界面初始化时同步一次，之后由 `job:queue` 事件推送）。
+#[tauri::command]
+pub fn queue_snapshot(state: State<'_, JobState>) -> QueueSnapshot {
+    state.snapshot()
+}
+
+/// 尝试启动下一个任务；返回是否启动了任务。
+///
+/// 只有队列由空闲转为运行时才会取出任务，因此这里清理遗留临时文件是安全的
+/// （此时没有其他任务的 FFmpeg 在写临时文件）。
+fn pump(app: &AppHandle, state: &JobState) -> bool {
+    let Some(job) = state.take_next() else {
+        return false;
+    };
+    let job_id = job.meta.id.clone();
+    if let Some(dir) = job.temp_path.parent() {
+        planner::clean_stale_temp_files(dir);
     }
-    job.cancel_tx
-        .send(true)
-        .map_err(|_| "任务已结束，无法取消".to_string())
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    state.set_cancel(&job_id, cancel_tx);
+
+    let _ = app.emit(
+        "job:started",
+        JobStartedDto {
+            job_id: job_id.clone(),
+            name: job.meta.name.clone(),
+            input_path: job.meta.input_path.clone(),
+            output_path: job.final_path.display().to_string(),
+            duration_secs: job.duration_secs,
+            notice: job.notice.clone(),
+            started_at_ms: unix_now_ms(),
+        },
+    );
+
+    let task_app = app.clone();
+    let task_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        run_job(task_app, task_state, job, cancel_rx).await;
+    });
+    true
+}
+
+/// 运行一个任务：转发日志与进度、写入任务历史、收尾并调度下一个任务。
+async fn run_job(
+    app: AppHandle,
+    state: JobState,
+    job: PreparedJob,
+    cancel_rx: watch::Receiver<bool>,
+) {
+    let PreparedJob {
+        meta,
+        config,
+        duration_secs,
+        ffmpeg_path,
+        args,
+        input_path,
+        temp_path,
+        final_path,
+        overwrite,
+        notice,
+    } = job;
+    let job_id = meta.id.clone();
+    let started_at_ms = unix_now_ms();
+
+    // 事件转发：日志同时保留尾部用于写入任务历史
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<EncodeEvent>();
+    let forward_app = app.clone();
+    let forward_id = job_id.clone();
+    let forwarder = tauri::async_runtime::spawn(async move {
+        let mut tail: Vec<String> = Vec::with_capacity(LOG_TAIL_KEEP);
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                EncodeEvent::Log(line) => {
+                    if tail.len() >= LOG_TAIL_KEEP {
+                        tail.remove(0);
+                    }
+                    tail.push(line.clone());
+                    let _ = forward_app.emit(
+                        "job:log",
+                        JobLogDto {
+                            job_id: forward_id.clone(),
+                            line,
+                        },
+                    );
+                }
+                EncodeEvent::Progress(snapshot) => {
+                    let _ = forward_app
+                        .emit("job:progress", JobProgressDto::new(&forward_id, &snapshot));
+                }
+            }
+        }
+        tail
+    });
+
+    let result = run_encode(
+        EncodeRequest {
+            ffmpeg_path,
+            args,
+            input_path,
+            temp_path,
+            final_path,
+            overwrite,
+            duration_secs,
+            cancel: cancel_rx,
+        },
+        event_tx,
+    )
+    .await;
+    // 等转发结束，保证日志与进度事件先于 finished 送达界面
+    let log_tail = forwarder.await.unwrap_or_default();
+    let finished_at_ms = unix_now_ms();
+
+    let record = JobRecord {
+        id: job_id.clone(),
+        name: meta.name.clone(),
+        input_path: meta.input_path.clone(),
+        output_path: result.output_path.as_ref().map(|p| p.display().to_string()),
+        status: result.status,
+        error: result.error.clone(),
+        notice: notice.clone(),
+        config,
+        duration_secs,
+        started_at_ms,
+        finished_at_ms,
+        elapsed_secs: result.elapsed.as_secs_f64(),
+        log_tail: truncate_log_tail(&log_tail),
+    };
+    let history_error = match settings::history_path(&app) {
+        Ok(path) => HistoryStore::new(path).prepend(record).err(),
+        Err(e) => Some(e),
+    };
+    if let Some(error) = &history_error {
+        let _ = app.emit(
+            "job:log",
+            JobLogDto {
+                job_id: job_id.clone(),
+                line: format!("任务历史写入失败：{error}"),
+            },
+        );
+    }
+
+    state.clear_cancel(&job_id);
+    state.finish_active();
+    let _ = app.emit(
+        "job:finished",
+        JobFinishedDto {
+            job_id,
+            status: result.status,
+            error: result.error,
+            output_path: result.output_path.map(|p| p.display().to_string()),
+            elapsed_secs: result.elapsed.as_secs_f64(),
+            history_error,
+        },
+    );
+    emit_queue(&app, &state);
+    // 队列中还有任务时继续运行
+    pump(&app, &state);
+}
+
+fn emit_queue(app: &AppHandle, state: &JobState) {
+    let _ = app.emit("job:queue", state.snapshot());
 }
