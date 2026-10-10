@@ -164,6 +164,8 @@ fn finalize_output(request: &EncodeRequest) -> Result<(), String> {
         if target.is_dir() {
             return Err(format!("输出路径是文件夹：{}", target.display()));
         }
+        // Windows 下只读属性的文件无法被删除：先清属性再移除。
+        crate::planner::clear_readonly(target);
         std::fs::remove_file(target)
             .map_err(|e| format!("无法移除已存在的输出文件（{}）：{e}", target.display()))?;
     }
@@ -488,6 +490,34 @@ mod tests {
         record.speed = Some(10.0);
         record.out_time_us = Some(20_000_000);
         assert_eq!(snapshot_from_record(&record, Some(20.0)).eta_secs, None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn finalize_output_overwrites_readonly_target() {
+        let dir = temp_dir("finalize-readonly");
+        let temp = dir.join("tmp.aozora-part-e-1.mkv");
+        let target = dir.join("out.mkv");
+        std::fs::write(&temp, "新内容").unwrap();
+        std::fs::write(&target, "旧内容").unwrap();
+        let mut permissions = std::fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&target, permissions).unwrap();
+
+        let request = EncodeRequest {
+            ffmpeg_path: PathBuf::new(),
+            args: Vec::new(),
+            input_path: dir.join("in.mkv"),
+            temp_path: temp.clone(),
+            final_path: target.clone(),
+            overwrite: true,
+            duration_secs: None,
+            cancel: watch::channel(false).1,
+        };
+        assert!(finalize_output(&request).is_ok());
+        assert_eq!(std::fs::read(&target).unwrap(), "新内容".as_bytes());
+        assert!(!temp.exists(), "临时文件应已重命名");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// 实机验证：真实 ffmpeg 完成一次压制（非 ASCII / 空格 / 括号路径），

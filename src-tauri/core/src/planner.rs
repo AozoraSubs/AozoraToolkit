@@ -133,26 +133,71 @@ pub fn check_paths(input: &Path, output: &Path, overwrite: bool) -> Result<(), S
     Ok(())
 }
 
+/// 判断文件名是否属于本应用的临时输出（`*.aozora-part-*`），
+/// 这类文件是崩溃/强杀遗留的垃圾，可以安全清理。
+pub fn is_temp_output_name(name: &str) -> bool {
+    name.contains(".aozora-part-")
+}
+
+/// 清除文件的只读属性（Windows 下只读属性会使打开写入与删除都失败）。
+/// 非 Windows 平台为 no-op。
+#[allow(clippy::permissions_set_readonly_false)]
+pub fn clear_readonly(path: &Path) {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut permissions = metadata.permissions();
+        if permissions.readonly() {
+            // 现代 std 在 Windows 上会正确清除 FILE_ATTRIBUTE_READONLY
+            // （由 verify_writable_cleans_readonly_stale_temp 用例实测覆盖）。
+            permissions.set_readonly(false);
+            let _ = std::fs::set_permissions(path, permissions);
+        }
+    }
+}
+
+fn try_open_writable(target: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(target)
+}
+
 /// 启动前探测输出位置是否可写：以写模式创建（或截断）目标文件后立即删除。
 ///
 /// FFmpeg 遇到权限问题时只报 `Permission denied`（退出码 -13），无法区分
 /// "目录不可写"与"同名文件被占用/只读"；这里提前探测并给出可读原因，
-/// 让用户在任务开始前就知道问题所在。
+/// 让用户在任务开始前就知道问题所在。若是本应用遗留的临时输出
+/// （`*.aozora-part-*`，可能带只读属性），先自动清理后重试。
 pub fn verify_writable(target: &Path) -> Result<(), String> {
     let existed = target.exists();
-    let result = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(target);
-    match result {
+    match try_open_writable(target) {
         Ok(file) => {
             drop(file);
             // 探测文件用完即删，不留下垃圾（FFmpeg 稍后会重新创建）。
             let _ = std::fs::remove_file(target);
             Ok(())
         }
-        Err(e) => {
+        Err(first_error) => {
+            let is_our_temp = target
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(is_temp_output_name)
+                .unwrap_or(false);
+            // 崩溃遗留的临时输出：清只读属性后删除并重试一次。
+            if is_our_temp && target.exists() {
+                clear_readonly(target);
+                if std::fs::remove_file(target).is_ok() {
+                    if let Ok(file) = try_open_writable(target) {
+                        drop(file);
+                        let _ = std::fs::remove_file(target);
+                        return Ok(());
+                    }
+                }
+                return Err(format!(
+                    "无法清理旧的临时输出文件（{}）：{first_error}。文件可能被其他程序占用，请关闭占用该文件的程序后重试",
+                    target.display()
+                ));
+            }
             let parent = target
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
@@ -160,12 +205,12 @@ pub fn verify_writable(target: &Path) -> Result<(), String> {
                 .unwrap_or_else(|| "（未知目录）".to_string());
             if existed {
                 Err(format!(
-                    "无法覆盖已存在的文件（{}）：{e}。文件可能被其他程序占用、为只读属性，或目录权限不足",
+                    "无法覆盖已存在的文件（{}）：{first_error}。文件可能被其他程序占用、为只读属性，或目录权限不足",
                     target.display()
                 ))
             } else {
                 Err(format!(
-                    "输出目录不可写（{parent}）：{e}。请检查目录权限、杀毒软件或\"受控文件夹访问\"设置",
+                    "输出目录不可写（{parent}）：{first_error}。请检查目录权限、安全软件拦截或\"受控文件夹访问\"设置",
                 ))
             }
         }
@@ -373,6 +418,22 @@ mod tests {
         let err = verify_writable(&target).unwrap_err();
         assert!(err.contains("无法覆盖已存在的文件"), "error: {err}");
         fs::remove_file(&target).ok();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verify_writable_cleans_readonly_stale_temp() {
+        let dir = temp_dir("stale-temp");
+        // 模拟崩溃遗留的只读临时输出文件
+        let target = dir.join("out.aozora-part-e-123.mkv");
+        fs::write(&target, "残留").unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&target, permissions).unwrap();
+
+        assert!(verify_writable(&target).is_ok());
+        assert!(!target.exists(), "残留临时文件应被自动清理");
         fs::remove_dir_all(&dir).ok();
     }
 
