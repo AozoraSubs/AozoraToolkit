@@ -67,8 +67,19 @@ pub fn build_args(
     push(&mut args, "-c:a");
     push(&mut args, "copy");
 
-    // 字幕与附件：M2 不处理，显式丢弃（M4 实现映射与保留策略）。
-    push(&mut args, "-sn");
+    // 字幕：按配置丢弃（-sn）或保留全部字幕轨（复制）。
+    // 附件流始终不映射；按轨精细映射属 M4。
+    match config.subtitles.mode {
+        encode::SubtitleMode::Copy => {
+            push(&mut args, "-map");
+            push(&mut args, "0:s?");
+            push(&mut args, "-c:s");
+            push(&mut args, "copy");
+        }
+        encode::SubtitleMode::Drop => {
+            push(&mut args, "-sn");
+        }
+    }
 
     // 机器可读进度 + 抑制控制台统计（进度走 stdout，日志走 stderr）。
     push(&mut args, "-progress");
@@ -304,7 +315,10 @@ pub fn fallback_output_path(temp_dir: &Path, final_output: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encode::{AudioConfig, AudioMode, OutputConfig, QualityMode, VideoConfig};
+    use crate::encode::{
+        AudioConfig, AudioMode, OutputConfig, QualityMode, SubtitleConfig, SubtitleMode,
+        VideoConfig,
+    };
     use std::fs;
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -329,6 +343,7 @@ mod tests {
             audio: AudioConfig {
                 mode: AudioMode::Copy,
             },
+            subtitles: SubtitleConfig::default(),
             output: OutputConfig {
                 path: PathBuf::from("out.mkv"),
                 overwrite: false,
@@ -361,6 +376,38 @@ mod tests {
         );
         assert!(!joined.contains("-pix_fmt"), "args: {joined}");
         assert_eq!(args.last().unwrap(), &OsString::from("out.mkv"));
+    }
+
+    #[test]
+    fn subtitle_copy_mode_maps_and_copies_subtitles() {
+        let mut config = x264_config(18, "slow");
+        config.subtitles = SubtitleConfig {
+            mode: SubtitleMode::Copy,
+        };
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
+        let text: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = text.join(" ");
+        assert!(joined.contains("-map 0:s? -c:s copy"), "args: {joined}");
+        assert!(!joined.contains("-sn"), "args: {joined}");
+    }
+
+    #[test]
+    fn subtitle_drop_mode_uses_sn() {
+        let mut config = x264_config(18, "slow");
+        config.subtitles = SubtitleConfig {
+            mode: SubtitleMode::Drop,
+        };
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
+        let text: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = text.join(" ");
+        assert!(joined.contains("-sn"), "args: {joined}");
+        assert!(!joined.contains("-c:s"), "args: {joined}");
     }
 
     #[test]

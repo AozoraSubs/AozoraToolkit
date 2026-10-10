@@ -824,4 +824,102 @@ mod tests {
                 .unwrap_or("无错误输出")
         );
     }
+
+    /// 实机验证：字幕保留（复制）与丢弃两种模式。
+    /// 生成带字幕轨（SRT，含中文）的 MKV 输入，分别以 copy / drop
+    /// 压制，验证输出字幕轨的有无。
+    #[tokio::test]
+    #[ignore = "requires ffmpeg and ffprobe on PATH"]
+    async fn encode_preserves_and_drops_subtitles() {
+        use crate::encode::SubtitleMode;
+        use crate::probe::probe_media;
+
+        let ffmpeg = ffmpeg_on_path();
+        let path_entries: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        let ffprobe = find_in_path("ffprobe", &path_entries).expect("ffprobe 未在 PATH 中检测到");
+
+        let dir = temp_dir("subtitles");
+        let base = dir.join("in.mp4");
+        generate_input(&ffmpeg, &base, 2);
+        let srt = dir.join("字幕.srt");
+        std::fs::write(
+            &srt,
+            "1\r\n00:00:00,000 --> 00:00:01,000\r\n中文字幕 测试\r\n\r\n\
+             2\r\n00:00:01,000 --> 00:00:02,000\r\nSecond line\r\n",
+        )
+        .unwrap();
+        let input = dir.join("带字幕.mkv");
+        let mux = std::process::Command::new(&ffmpeg)
+            .args(["-y", "-i"])
+            .arg(&base)
+            .arg("-i")
+            .arg(&srt)
+            .args(["-map", "0", "-map", "1", "-c", "copy", "-c:s", "srt"])
+            .arg(&input)
+            .output()
+            .expect("封装字幕 MKV 失败");
+        assert!(
+            mux.status.success(),
+            "封装字幕 MKV 失败：{}",
+            String::from_utf8_lossy(&mux.stderr)
+                .lines()
+                .last()
+                .unwrap_or("无错误输出")
+        );
+        let input_info = probe_media(&ffprobe, &input).expect("输入探测失败");
+        assert_eq!(input_info.subtitle_streams.len(), 1, "输入应含 1 条字幕轨");
+
+        for (mode, expect_subtitles) in [(SubtitleMode::Copy, true), (SubtitleMode::Drop, false)] {
+            let output = dir.join(format!("out-{mode:?}.mkv"));
+            let mut config = config_for("libx264", "veryfast", 23);
+            config.subtitles.mode = mode;
+            let temp = planner::temp_output_path(&dir, &output, "e-test-sub");
+            let args = planner::build_args(&config, &input, &temp).unwrap();
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (event_tx, _event_rx) = collect_events();
+
+            let result = run_encode(
+                EncodeRequest {
+                    ffmpeg_path: ffmpeg.clone(),
+                    args,
+                    input_path: input.clone(),
+                    temp_path: temp.clone(),
+                    final_path: output.clone(),
+                    overwrite: false,
+                    duration_secs: None,
+                    cancel: cancel_rx,
+                },
+                event_tx,
+            )
+            .await;
+
+            assert_eq!(
+                result.status,
+                EncodeStatus::Completed,
+                "{mode:?} 失败：{:?}",
+                result.error
+            );
+            let out_info = probe_media(&ffprobe, &output).expect("输出探测失败");
+            if expect_subtitles {
+                assert_eq!(
+                    out_info.subtitle_streams.len(),
+                    1,
+                    "{mode:?} 应保留 1 条字幕轨"
+                );
+                assert_eq!(
+                    out_info.subtitle_streams[0].codec_name, "subrip",
+                    "{mode:?} 字幕编码应为 subrip"
+                );
+            } else {
+                assert!(
+                    out_info.subtitle_streams.is_empty(),
+                    "{mode:?} 不应保留字幕轨"
+                );
+            }
+            assert!(!temp.exists(), "{mode:?} 临时文件未清理");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

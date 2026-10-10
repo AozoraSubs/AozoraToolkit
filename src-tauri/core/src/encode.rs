@@ -22,6 +22,10 @@ pub struct EncodeConfig {
     pub schema_version: u32,
     pub video: VideoConfig,
     pub audio: AudioConfig,
+    /// 字幕处理（M4 提前实施的最小选项：丢弃 / 保留全部）。
+    /// 旧版配置无此字段时按默认（丢弃）处理。
+    #[serde(default)]
+    pub subtitles: SubtitleConfig,
     pub output: OutputConfig,
 }
 
@@ -31,6 +35,7 @@ impl Default for EncodeConfig {
             schema_version: ENCODE_CONFIG_SCHEMA_VERSION,
             video: VideoConfig::default(),
             audio: AudioConfig::default(),
+            subtitles: SubtitleConfig::default(),
             output: OutputConfig::default(),
         }
     }
@@ -89,6 +94,29 @@ impl Default for AudioConfig {
 #[serde(rename_all = "camelCase")]
 pub enum AudioMode {
     Copy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleConfig {
+    /// `copy`：保留全部字幕轨（`-map 0:s? -c:s copy`）；
+    /// `drop`：丢弃字幕（`-sn`）。按轨精细映射属 M4。
+    pub mode: SubtitleMode,
+}
+
+impl Default for SubtitleConfig {
+    fn default() -> Self {
+        Self {
+            mode: SubtitleMode::Drop,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtitleMode {
+    Copy,
+    Drop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +311,10 @@ pub fn validate_config(config: &EncodeConfig) -> Result<(), String> {
     match config.audio.mode {
         AudioMode::Copy => {}
     }
+    // 字幕模式目前仅两种取值（枚举），都合法；保留显式分支便于未来扩展。
+    match config.subtitles.mode {
+        SubtitleMode::Copy | SubtitleMode::Drop => {}
+    }
     Ok(())
 }
 
@@ -366,6 +398,7 @@ mod tests {
                 pixel_format: Some("yuv420p10le".into()),
             },
             audio: AudioConfig::default(),
+            subtitles: SubtitleConfig::default(),
             output: OutputConfig {
                 path: PathBuf::from(r"D:\out.mkv"),
                 overwrite: true,
@@ -378,7 +411,29 @@ mod tests {
             json.contains("\"pixelFormat\":\"yuv420p10le\""),
             "json: {json}"
         );
+        assert!(
+            json.contains("\"subtitles\":{\"mode\":\"drop\"}"),
+            "json: {json}"
+        );
         let restored: EncodeConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, config);
+    }
+
+    #[test]
+    fn json_without_subtitles_field_defaults_to_drop() {
+        let json = r#"{
+          "schemaVersion": 1,
+          "video": {
+            "encoderId": "libx264",
+            "qualityMode": "crf",
+            "qualityValue": 18,
+            "preset": "slow",
+            "pixelFormat": null
+          },
+          "audio": { "mode": "copy" },
+          "output": { "path": "out.mkv", "overwrite": false }
+        }"#;
+        let config: EncodeConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.subtitles.mode, SubtitleMode::Drop);
     }
 }
