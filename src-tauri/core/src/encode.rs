@@ -42,7 +42,7 @@ impl Default for EncodeConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VideoConfig {
     pub encoder_id: String,
     pub quality_mode: QualityMode,
@@ -76,7 +76,7 @@ pub enum QualityMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AudioConfig {
     /// M2 仅支持 `copy`（复制原音轨，`-c:a copy`）。
     pub mode: AudioMode,
@@ -97,7 +97,7 @@ pub enum AudioMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubtitleConfig {
     /// `copy`：保留全部字幕轨（`-map 0:s? -c:s copy`）；
     /// `drop`：丢弃字幕（`-sn`）；
@@ -129,7 +129,7 @@ pub enum SubtitleMode {
 pub const BURN_SUBTITLE_EXTENSIONS: [&str; 2] = ["srt", "ass"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutputConfig {
     pub path: PathBuf,
     /// 输出文件已存在时是否覆盖。

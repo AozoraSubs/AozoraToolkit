@@ -201,6 +201,17 @@ pub async fn run_encode(
         let _ = std::fs::remove_file(&request.temp_path);
     }
 
+    // 启动前已收到取消请求：直接按取消处理，不再启动 FFmpeg。
+    if *request.cancel.borrow() {
+        return EncodeResult {
+            status: EncodeStatus::Cancelled,
+            error: None,
+            output_path: None,
+            last_progress: None,
+            elapsed: started.elapsed(),
+        };
+    }
+
     let mut ffmpeg_command = Command::new(&request.ffmpeg_path);
     crate::process_flags::hide_console_tokio(&mut ffmpeg_command);
     let mut child = match ffmpeg_command

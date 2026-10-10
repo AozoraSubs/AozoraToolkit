@@ -327,8 +327,10 @@ pub fn verify_destination_writable(final_output: &Path, job_id: &str) -> Result<
 }
 
 /// 目标目录不可写时的回退成品路径：应用临时目录内、沿用最终输出的
-/// 文件名。应用临时目录由应用独占且保证可写（沙箱/受限环境下也能用）。
-pub fn fallback_output_path(temp_dir: &Path, final_output: &Path) -> PathBuf {
+/// 文件名主干，并附加任务 ID 保证唯一——应用临时目录是所有回退成品
+/// 共用的目录，若只按文件名命名，不同目录下的同名输入（或重复入队的
+/// 同一配置）会互相覆盖成品。
+pub fn fallback_output_path(temp_dir: &Path, final_output: &Path, job_id: &str) -> PathBuf {
     let stem = final_output
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -337,7 +339,7 @@ pub fn fallback_output_path(temp_dir: &Path, final_output: &Path) -> PathBuf {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("mkv");
-    temp_dir.join(format!("{stem}.{ext}"))
+    temp_dir.join(format!("{stem}.{job_id}.{ext}"))
 }
 
 #[cfg(test)]
@@ -712,10 +714,13 @@ mod tests {
     }
 
     #[test]
-    fn fallback_output_path_uses_temp_dir_with_same_name() {
+    fn fallback_output_path_is_unique_per_job() {
         let temp_dir = Path::new(r"C:\app\encode-tmp");
         let final_output = Path::new(r"D:\影片\样片.encoded.mkv");
-        let fallback = fallback_output_path(temp_dir, final_output);
-        assert_eq!(fallback, Path::new(r"C:\app\encode-tmp\样片.encoded.mkv"));
+        let first = fallback_output_path(temp_dir, final_output, "e-1");
+        assert_eq!(first, Path::new(r"C:\app\encode-tmp\样片.encoded.e-1.mkv"));
+        // 不同任务（即使最终文件名相同）的回退路径必须不同，避免互相覆盖成品
+        let second = fallback_output_path(temp_dir, Path::new(r"E:\其他\样片.encoded.mkv"), "e-2");
+        assert_ne!(first, second);
     }
 }

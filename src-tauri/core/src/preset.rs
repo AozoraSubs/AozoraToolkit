@@ -253,6 +253,15 @@ pub fn new_preset_id(now_ms: u64) -> String {
     format!("p-{now_ms:x}-{counter}")
 }
 
+/// 追加后缀并保证总长度不超过名称上限（超长部分先截断，
+/// 避免"导入时因加后缀而报名称过长"这种误导性错误）。
+fn with_suffix_within_limit(base: &str, suffix: &str) -> String {
+    let suffix_len = suffix.chars().count();
+    let keep = MAX_PRESET_NAME_CHARS.saturating_sub(suffix_len);
+    let truncated: String = base.chars().take(keep).collect();
+    format!("{}{}", truncated.trim_end(), suffix)
+}
+
 // ---------- 存储 ----------
 
 /// 预设存储：内置预设在内存中，用户预设为 `dir/<id>.json`。
@@ -446,16 +455,17 @@ impl PresetStore {
             return base.to_string();
         }
         for index in 1..100 {
-            let candidate = if index == 1 {
-                format!("{base}（导入）")
+            let suffix = if index == 1 {
+                "（导入）".to_string()
             } else {
-                format!("{base}（导入 {index}）")
+                format!("（导入 {index}）")
             };
+            let candidate = with_suffix_within_limit(base, &suffix);
             if !taken(&candidate) {
                 return candidate;
             }
         }
-        format!("{base}（导入）")
+        with_suffix_within_limit(base, "（导入）")
     }
 
     /// 原子写入：先写临时文件，再重命名覆盖（Windows 上同样是替换语义）。
@@ -684,6 +694,55 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("解析失败"), "error: {err}");
+
+        // 嵌套结构中的未知字段同样必须被拒绝（例如字段名拼写错误）
+        let err = store
+            .import_text(
+                r#"{"schemaVersion":1,"id":"x","name":"y",
+                    "video":{"encoderId":"libx264","qualityMode":"crf","qualityValue":18,"preset":"slow","pixelFormat":null,"crfTune":"film"},
+                    "audio":{"mode":"copy"},
+                    "output":{"overwrite":false}}"#,
+                2,
+            )
+            .unwrap_err();
+        assert!(err.contains("解析失败"), "error: {err}");
+
+        let err = store
+            .import_text(
+                r#"{"schemaVersion":1,"id":"x","name":"y",
+                    "video":{"encoderId":"libx264","qualityMode":"crf","qualityValue":18,"preset":"slow","pixelFormat":null},
+                    "audio":{"mode":"copy","bitrate":"320k"},
+                    "subtitles":{"mode":"drop","externalPath":null,"font":"Arial"},
+                    "output":{"overwrite":false}}"#,
+                3,
+            )
+            .unwrap_err();
+        assert!(err.contains("解析失败"), "error: {err}");
+    }
+
+    #[test]
+    fn import_truncates_name_before_adding_suffix() {
+        let (store, _dir) = store("import-long-name");
+        let long_name = "名".repeat(MAX_PRESET_NAME_CHARS);
+        let mut draft = input(&long_name);
+        draft.name = long_name.clone();
+        store.create(draft, 1).unwrap();
+
+        let mut source = store.create(input("导入源"), 2).unwrap();
+        source.name = long_name;
+        let text = serde_json::to_string(&source).unwrap();
+        // 加"（导入）"后缀后仍须在名称长度上限内
+        let imported = store.import_text(&text, 3).unwrap();
+        assert!(
+            imported.name.ends_with("（导入）"),
+            "name: {}",
+            imported.name
+        );
+        assert!(
+            imported.name.chars().count() <= MAX_PRESET_NAME_CHARS,
+            "name length: {}",
+            imported.name.chars().count()
+        );
     }
 
     #[test]

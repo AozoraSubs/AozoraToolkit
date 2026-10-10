@@ -168,7 +168,7 @@ fn prepare_job(
                     &temp_dir,
                 ));
                 (
-                    planner::fallback_output_path(&temp_dir, &output),
+                    planner::fallback_output_path(&temp_dir, &output, &job_id),
                     notice,
                     true,
                 )
@@ -218,10 +218,16 @@ pub async fn enqueue_job(
         .map_err(|e| format!("后台任务执行失败：{e}"))??
     };
 
-    let job_id = prepared.meta.id.clone();
-    state.enqueue(prepared.meta.clone())?;
+    // 先保存执行数据再入队：队列一旦能看到任务，其数据必然可取，
+    // 避免调度时出现"任务已在运行但没有数据"的中间状态。
+    let meta = prepared.meta.clone();
     state.store_prepared(prepared);
+    if let Err(error) = state.enqueue(meta.clone()) {
+        state.drop_prepared(&meta.id);
+        return Err(error);
+    }
 
+    let job_id = meta.id;
     let started = pump(&app, &state);
     emit_queue(&app, &state);
     let position = if started {
@@ -263,37 +269,54 @@ pub fn queue_snapshot(state: State<'_, JobState>) -> QueueSnapshot {
 /// 尝试启动下一个任务；返回是否启动了任务。
 ///
 /// 只有队列由空闲转为运行时才会取出任务，因此这里清理遗留临时文件是安全的
-/// （此时没有其他任务的 FFmpeg 在写临时文件）。
+/// （此时没有其他任务的 FFmpeg 在写临时文件）。注意该清理跑在应用自己的
+/// 临时目录上，前提是同一时间只有一个应用实例在压制。
 fn pump(app: &AppHandle, state: &JobState) -> bool {
-    let Some(job) = state.take_next() else {
-        return false;
-    };
-    let job_id = job.meta.id.clone();
-    if let Some(dir) = job.temp_path.parent() {
-        planner::clean_stale_temp_files(dir);
+    // 上限仅用于防止内部状态异常时无限循环（正常情况一次即返回）。
+    for _ in 0..64 {
+        let Some((meta, payload)) = state.take_next() else {
+            return false;
+        };
+        let Some(job) = payload else {
+            // 执行数据缺失属内部错误：结束该任务并继续下一个，避免队列卡死。
+            let _ = app.emit(
+                "job:log",
+                JobLogDto {
+                    job_id: meta.id.clone(),
+                    line: "任务数据缺失，已跳过该任务".to_string(),
+                },
+            );
+            state.finish_active();
+            continue;
+        };
+        let job_id = job.meta.id.clone();
+        if let Some(dir) = job.temp_path.parent() {
+            planner::clean_stale_temp_files(dir);
+        }
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        state.set_cancel(&job_id, cancel_tx);
+
+        let _ = app.emit(
+            "job:started",
+            JobStartedDto {
+                job_id,
+                name: job.meta.name.clone(),
+                input_path: job.meta.input_path.clone(),
+                output_path: job.final_path.display().to_string(),
+                duration_secs: job.duration_secs,
+                notice: job.notice.clone(),
+                started_at_ms: unix_now_ms(),
+            },
+        );
+
+        let task_app = app.clone();
+        let task_state = state.clone();
+        tauri::async_runtime::spawn(async move {
+            run_job(task_app, task_state, job, cancel_rx).await;
+        });
+        return true;
     }
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    state.set_cancel(&job_id, cancel_tx);
-
-    let _ = app.emit(
-        "job:started",
-        JobStartedDto {
-            job_id: job_id.clone(),
-            name: job.meta.name.clone(),
-            input_path: job.meta.input_path.clone(),
-            output_path: job.final_path.display().to_string(),
-            duration_secs: job.duration_secs,
-            notice: job.notice.clone(),
-            started_at_ms: unix_now_ms(),
-        },
-    );
-
-    let task_app = app.clone();
-    let task_state = state.clone();
-    tauri::async_runtime::spawn(async move {
-        run_job(task_app, task_state, job, cancel_rx).await;
-    });
-    true
+    false
 }
 
 /// 运行一个任务：转发日志与进度、写入任务历史、收尾并调度下一个任务。

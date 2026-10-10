@@ -5,7 +5,7 @@
 
 use crate::settings;
 use aozora_core::preset::{Preset, PresetInput, PresetList, PresetStore, MAX_PRESET_FILE_BYTES};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 /// 在阻塞线程池中执行文件读写，避免占用 Tauri 主线程。
@@ -47,11 +47,27 @@ pub async fn delete_preset(app: AppHandle, id: String) -> Result<(), String> {
     run_blocking(move || store(&app)?.delete(&id)).await
 }
 
+/// 校验预设文件扩展名（命令层不信任前端传来的任意路径）。
+fn require_json_extension(path: &Path, action: &str) -> Result<(), String> {
+    let is_json = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if !is_json {
+        return Err(format!(
+            "{action}的文件扩展名必须是 .json：{}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 /// 从 JSON 文件导入预设；文件内容与编码参数都会校验，ID 重新分配。
 #[tauri::command]
 pub async fn import_preset_file(app: AppHandle, path: String) -> Result<Preset, String> {
     run_blocking(move || {
         let file = PathBuf::from(&path);
+        require_json_extension(&file, "导入")?;
         if !file.is_file() {
             return Err(format!("预设文件不存在或不是文件：{path}"));
         }
@@ -75,8 +91,12 @@ pub async fn import_preset_file(app: AppHandle, path: String) -> Result<Preset, 
 #[tauri::command]
 pub async fn export_preset_file(app: AppHandle, id: String, path: String) -> Result<(), String> {
     run_blocking(move || {
-        let text = store(&app)?.export_text(&id)?;
         let target = PathBuf::from(&path);
+        require_json_extension(&target, "导出")?;
+        if target.is_dir() {
+            return Err(format!("导出目标是文件夹：{}", target.display()));
+        }
+        let text = store(&app)?.export_text(&id)?;
         if let Some(dir) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
             if !dir.is_dir() {
                 return Err(format!("导出目录不存在：{}", dir.display()));

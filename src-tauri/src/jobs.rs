@@ -65,10 +65,19 @@ impl JobState {
         Self::lock(&self.prepared).insert(job.meta.id.clone(), job);
     }
 
-    /// 取出下一个待运行任务（空闲时才会返回），并接管其执行数据。
-    pub fn take_next(&self) -> Option<PreparedJob> {
+    /// 丢弃任务的执行数据（入队失败时回滚）。
+    pub fn drop_prepared(&self, job_id: &str) {
+        Self::lock(&self.prepared).remove(job_id);
+    }
+
+    /// 取出下一个待运行任务（空闲时才会返回）及其执行数据。
+    ///
+    /// 入队顺序保证"先存执行数据、再进队列"，因此数据缺失只可能是内部错误；
+    /// 调用方需要结束该任务，避免队列卡死。
+    pub fn take_next(&self) -> Option<(JobMeta, Option<PreparedJob>)> {
         let meta = Self::lock(&self.queue).take_next()?;
-        Self::lock(&self.prepared).remove(&meta.id)
+        let payload = Self::lock(&self.prepared).remove(&meta.id);
+        Some((meta, payload))
     }
 
     /// 运行中任务结束。
