@@ -239,6 +239,17 @@
 - **PLAN 更新：** M4 清单新增"字幕处理选项"并勾选（原"字幕轨映射与保留策略"保持未勾选，指按轨精细映射）；§11 M4 同步。
 - **剩余工作：** 回到 M3（预设与队列）。
 
+### 2026-10-10（M4 提前项二）：烧录外部字幕文件（srt / ass）
+
+- **本次完成：** 澄清用户需求为**烧录自定义路径的外部字幕文件**而非视频内打包字幕。实现：`SubtitleMode` 新增 `Burn`，`SubtitleConfig` 新增 `external_path`（serde 默认 None，旧配置兼容）；烧录参数 `-vf subtitles=filename='…'`（libass `subtitles` 滤镜同时支持 srt/ass），路径按 `av_get_token` 规则转义（反斜杠→斜杠、`:`/`'` 转义、单引号包裹防 `,`/`;` 分裂），同时 `-sn` 丢弃视频内字幕轨；校验：burn 必须携带 srt/ass 文件；启动前检查字幕文件存在性 + FFmpeg 是否含 `subtitles` 滤镜（`CapabilityReport.has_subtitles_filter` 与轻量 `has_filter`，缺 libass 时给出可读错误）；压制页新增「烧录外部字幕」选项（能力不足时禁用并标注）+ 字幕文件选择框。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace` 全部通过（新增 burn 校验、滤镜转义、参数生成等单元用例）。
+  - 实机集成测试（11/11）：新增 `encode_burns_external_subtitles`——含中文与括号的外部 SRT（`字幕 [外挂].srt`）烧录进测试视频：任务完成、日志出现 libass 滤镜初始化、输出无字幕轨、时长正常。
+  - 前端：`pnpm check/lint/format:check/test/build` 全绿；`pnpm tauri dev` 冒烟（窗口正常）。
+- **限制：** 烧录样式（字体/位置/大小）暂用字幕文件默认样式，自定义样式属 M4 后续；SRT 中文渲染依赖系统字体（本机具备）。
+- **PLAN 更新：** 无清单勾选变化（仍属 M4"ASS 字幕处理的基本支持"范围，按轨映射等后续）；README M4 清单更新。
+- **剩余工作：** M3（预设与队列）。
+
 ### 2026-10-10（体验修复批）：控制台弹窗、切页进度、探测卡顿与重复探测
 
 - **本次完成（用户提出 6 项中的 5 项）：**
