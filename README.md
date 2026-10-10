@@ -90,6 +90,16 @@
 
 Windows 构建说明：推荐安装 MSVC Build Tools（含 C++ 桌面开发负载）。若使用 GNU 工具链（`x86_64-pc-windows-gnu`），需要额外把 mingw-w64 binutils（`dlltool`、`ar`、`windres` 等）加入 `PATH`，因为部分依赖的构建脚本会直接调用 `dlltool`，且 build.rs 会用 `windres` 生成应用清单；项目已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器的导出序号上限问题。
 
+**受限/沙箱工作区提示（Windows）：** 如果工作区根目录带有"低完整性"标记（`Mandatory Label\Low Mandatory Level`，某些沙箱环境会自动施加），仓库内编译出的 `aozora-encode.exe` 会继承该标记，应用进程只能写工作区、无法写桌面/下载/D 盘等正常位置（表现为此类位置报"拒绝访问"，而 PowerShell 等正常进程不受影响）。这并非项目或 Tauri 的问题——任何复制进该目录的 exe 都会继承同一标记。修复（机器级，按需执行一次）：
+
+```powershell
+# 在 src-tauri 目录下执行；此后编译产物均继承中完整性标记
+icacls target /setintegritylevel "(CI)(OI)M"
+icacls target\debug\aozora-encode.exe /setintegritylevel M
+```
+
+普通 Windows 环境与 CI 无此标记，无需处理。
+
 ## 本地开发
 
 本项目统一使用 pnpm 管理前端依赖（当前固定 `pnpm@11.24.0`，见 `package.json` 的 `packageManager` 字段）。请安装 Node.js ≥ 22.12 和对应版本的 pnpm。
