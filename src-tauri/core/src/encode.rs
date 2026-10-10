@@ -259,6 +259,11 @@ fn default_quality_mode(family: EncoderFamily) -> QualityMode {
     }
 }
 
+/// 按编码器 ID 返回其质量控制模式（未知编码器返回 `None`）。
+pub fn quality_mode_for(encoder_id: &str) -> Option<QualityMode> {
+    encoder_spec(encoder_id).map(|spec| default_quality_mode(spec.family))
+}
+
 // ---------- 校验 ----------
 
 /// 校验编码配置的字段与范围（不涉及文件系统）。
