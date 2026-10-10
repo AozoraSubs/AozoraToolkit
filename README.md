@@ -152,7 +152,17 @@ CI 构建验证：`.github/workflows/build.yml` 在 Windows / macOS / Linux 三�
 macOS 首次打开 CI 产物：由于未公证，Gatekeeper 会拦截。把 app 拖入"应用程序"后，二选一：
 
 - 图形界面：系统设置 → 隐私与安全性 → 安全性 → 点"仍要打开"；
-- 终端：`xattr -d com.apple.quarantine "/Applications/Aozora Encode.app"`
+- 终端：`xattr -d com.apple.quarantine "/Applications/Aozora Toolbox.app"`
+
+## 产品名与内部标识
+
+面向用户的名称统一为 **Aozora Toolbox**（`src-tauri/tauri.conf.json` 的 `productName`）：窗口标题、设置页「应用」一栏、MSI 安装包文件名与开始菜单/桌面快捷方式都用这个名称。
+
+内部标识保持不变，改动前请先确认影响面：
+
+- Rust 包名 `aozora-encode`（应用）与 `aozora-core`（核心逻辑 crate）、lib 名 `aozora_encode_lib`：改名会连带影响 `use aozora_core::…`、`aozora_encode_lib::run()`、`cargo test -p aozora-core` 等命令。
+- 应用标识 `com.aozora.encode`：决定应用配置目录（Windows 为 `%APPDATA%\com.aozora.encode`）与 MSI 升级识别，改名会让旧配置目录不再被读取。
+- 打包产物内可执行文件名仍为 `aozora-encode.exe`（Tauri 只按 `productName` 命名安装包与显示名，不重命名可执行文件），因此下文的 `icacls target\debug\aozora-encode.exe` 等命令继续有效。
 
 ## 编码器与画质说明
 

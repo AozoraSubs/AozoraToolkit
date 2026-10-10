@@ -317,6 +317,24 @@
 - **PLAN 更新：** 无清单勾选变化（图标资源不属于 M4/M5 现有条目）；README「本地开发」新增应用图标与重新生成说明。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（品牌统一）：产品名改为 Aozora Toolbox 与版本号 0.2.2
+
+- **本次完成：** 按用户要求把面向用户的产品名统一为 **Aozora Toolbox**，并升级版本号。
+  1. 用户可见名称：`tauri.conf.json` 的 `productName` 与窗口 `title`、`index.html` 的 `<title>`、`src-tauri/Cargo.toml` 的 `authors`、`src-tauri/core/Cargo.toml` 的 `description`、`src-tauri/core/src/lib.rs` 的 crate 文档、`.github/workflows/build.yml` 中 macOS 签名验证的 `Aozora Toolbox.app`。
+  2. 设置页「应用」一栏此前显示 `env!("CARGO_PKG_NAME")`（内部 crate 名 `aozora-encode`），现改为 `app.package_info().name`（即 `productName`），与安装包、任务栏展示一致。
+  3. **内部标识保持不变**：Rust 包名 `aozora-encode` / `aozora-core`、lib 名 `aozora_encode_lib`、应用标识 `com.aozora.encode`、配置目录 `%APPDATA%\com.aozora.encode` 均未改动——避免破坏 `use aozora_core::…`、`aozora_encode_lib::run()`、既有用户配置目录与 MSI 升级识别。
+  4. 版本号 0.2.1 → **0.2.2**（修订号 +1）。
+- **版本号判断依据：** M3 已完成（当前 0.2.1），M4 清单仍未完成，本次变更不构成功能更新，不能升次版本；变更内容（图标资源、侧边栏品牌标识、产品名、版权标注）属于同一里程碑内的小改进与文档调整，按 CONTRIBUTING §3「修订号 +1」处理。版本变更按规范独立提交（`build:` 类型）。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo check --workspace`（通过，`Cargo.lock` 中 `aozora-encode` / `aozora-core` 同步为 0.2.2）、`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（87 单元 + 1 冒烟通过，11 实机用例保持 ignored）全部通过。
+  - 前端：`pnpm run format:check`、`pnpm run lint`、`pnpm run check`（0 错误 0 警告）、`pnpm test`（42 通过）全部通过。
+  - 实机窗口标题：`cargo run` 启动后 `PrintWindow` 抓图，标题栏为「Aozora Toolbox」。
+  - **MSI 打包验证（`pnpm tauri build`，2m24s 成功）：** 产物 `Aozora Toolbox_0.2.2_x64_en-US.msi`（2.30 MiB）；生成的 `target/release/wix/x64/main.wxs` 中 `Product Name="Aozora Toolbox"`、安装目录 `INSTALLDIR Name="Aozora Toolbox"`、开始菜单/桌面快捷方式名「Aozora Toolbox」、注册表键 `Software\aozora\Aozora Toolbox`，版本号 0.2.2。
+  - 打包产物内可执行文件名仍为 `aozora-encode.exe`（`main.wxs` 的 `File Source=…\aozora-encode.exe`）——Tauri 只按 `productName` 命名 MSI 与显示名，**不重命名内部可执行文件**，因此开发时的 exe 名与 README 中的 `icacls target\debug\aozora-encode.exe` 说明继续有效。
+- **限制（如实记录）：** 未实际安装 MSI 验证开始菜单/桌面快捷方式与「应用和功能」中的显示名（仅核对 WiX 源文件与产物文件名）；`bundle/msi/` 目录下仍留有旧的 `Aozora Encode_0.2.1_x64_en-US.msi`（历史构建产物，未清理，不入库）；macOS / Linux 产物未构建（本机无对应环境），仅同步了 `build.yml` 中硬编码的 `.app` 名称。
+- **PLAN 更新：** 无清单勾选变化；README 补充「产品名与内部标识」说明并修正 macOS `.app` 名称；本记录新增。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
