@@ -1,6 +1,6 @@
 {
   "name": "aozora-encode",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "A modern, lightweight, local-first video encoding toolbox powered by Tauri, Svelte and FFmpeg.",
   "type": "module",
   "packageManager": "pnpm@11.24.0",
