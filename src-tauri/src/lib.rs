@@ -4,21 +4,25 @@ mod settings;
 
 use serde::Serialize;
 use std::path::PathBuf;
+use tauri::AppHandle;
 
 #[derive(Serialize)]
 struct AppInfo {
-    name: &'static str,
-    version: &'static str,
+    /// 面向用户的显示名（取 `tauri.conf.json` 的 `productName`，
+    /// 与安装包、任务栏、设置页展示保持一致；不用 crate 名）。
+    name: String,
+    version: String,
     /// 周快照版本号（编译期注入；正式构建为 None）
     snapshot: Option<&'static str>,
 }
 
 /// Returns basic application identity information for the UI.
 #[tauri::command]
-fn app_info() -> AppInfo {
+fn app_info(app: AppHandle) -> AppInfo {
+    let package = app.package_info();
     AppInfo {
-        name: env!("CARGO_PKG_NAME"),
-        version: env!("CARGO_PKG_VERSION"),
+        name: package.name.clone(),
+        version: package.version.to_string(),
         snapshot: option_env!("AOZORA_SNAPSHOT_VERSION"),
     }
 }

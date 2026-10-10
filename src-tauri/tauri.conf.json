@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Aozora Encode",
+  "productName": "Aozora Toolbox",
   "version": "0.2.1",
   "identifier": "com.aozora.encode",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Aozora Encode",
+        "title": "Aozora Toolbox",
         "width": 1080,
         "height": 720,
         "minWidth": 800,

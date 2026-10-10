@@ -1,4 +1,4 @@
-//! Aozora Encode 核心逻辑：设置模型、FFmpeg/FFprobe 检测、能力检测、
+//! Aozora Toolbox 核心逻辑：设置模型、FFmpeg/FFprobe 检测、能力检测、
 //! 媒体探测、编码配置与参数生成、进度解析、FFmpeg 运行器、预设存储、
 //! 任务队列与任务历史。
 //! 本 crate 不依赖 Tauri，保证其测试可在任何环境（包括 Windows-GNU）
