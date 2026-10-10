@@ -41,8 +41,16 @@ export type JobStatus = "completed" | "failed" | "cancelled";
 
 export interface JobStartedEvent {
   jobId: string;
+  /** 任务显示名（输入文件名）。 */
+  name: string;
+  inputPath: string;
+  /** 计划写入的最终输出路径（可能因目标目录不可写而回退）。 */
+  outputPath: string;
+  /** 输入媒体时长（秒），用于进度百分比与 ETA。 */
+  durationSecs: number | null;
   /** 需要提醒用户的事项（如目标目录不可写、已回退保存位置）。 */
   notice: string | null;
+  startedAtMs: number;
 }
 
 export interface JobProgressEvent {
@@ -67,11 +75,23 @@ export interface JobFinishedEvent {
   error: string | null;
   outputPath: string | null;
   elapsedSecs: number;
+  /** 写入任务历史时的错误（例如历史文件版本不受支持）。 */
+  historyError: string | null;
+}
+
+/** 入队结果（对应 Rust `EnqueueResultDto`）。 */
+export interface EnqueueResult {
+  jobId: string;
+  started: boolean;
+  /** 排队位置（1 起算）；已开始运行时为 null。 */
+  position: number | null;
 }
 
 /** 前端维护的当前任务 UI 状态。 */
 export interface ActiveJobUi {
   id: string;
+  name: string;
+  inputPath: string;
   startedAt: number;
   /** 需要提醒用户的事项（如目标目录不可写、已回退保存位置）。 */
   notice: string | null;
@@ -88,6 +108,7 @@ export interface ActiveJobUi {
   error: string | null;
   outputPath: string | null;
   elapsedSecs: number;
+  historyError: string | null;
 }
 
 /** 编码器能力键（与 Rust `KnownEncoders` 对应）。 */
