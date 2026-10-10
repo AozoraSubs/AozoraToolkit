@@ -151,7 +151,10 @@ fn describe_exit(exit: &Result<std::process::ExitStatus, std::io::Error>) -> Str
     }
 }
 
-/// 成功时把临时输出重命名为最终输出（覆盖策略在此执行）。
+/// 成功时把临时输出移动到最终输出（覆盖策略在此执行）。
+///
+/// 临时输出位于应用自己的临时目录：与目标同卷时用重命名（原子且零拷贝）；
+/// 跨卷重命名失败时回退为"复制到目的地 + 删除临时文件"。
 fn finalize_output(request: &EncodeRequest) -> Result<(), String> {
     let target = &request.final_path;
     if target.exists() {
@@ -169,13 +172,19 @@ fn finalize_output(request: &EncodeRequest) -> Result<(), String> {
         std::fs::remove_file(target)
             .map_err(|e| format!("无法移除已存在的输出文件（{}）：{e}", target.display()))?;
     }
-    // 临时文件与最终输出同目录，重命名在同一卷内，具原子性。
-    std::fs::rename(&request.temp_path, target).map_err(|e| {
-        format!(
-            "移动临时输出失败（{} → {}）：{e}",
-            request.temp_path.display(),
-            target.display()
-        )
+    std::fs::rename(&request.temp_path, target).or_else(|rename_err| {
+        // 跨卷时重命名不可用：复制到目的地，成功后删除临时文件。
+        std::fs::copy(&request.temp_path, target)
+            .map(|_| {
+                let _ = std::fs::remove_file(&request.temp_path);
+            })
+            .map_err(|copy_err| {
+                format!(
+                    "移动临时输出失败（{} → {}）：{rename_err}；复制回退也失败：{copy_err}",
+                    request.temp_path.display(),
+                    target.display()
+                )
+            })
     })
 }
 
@@ -533,9 +542,11 @@ mod tests {
             .unwrap_or_default();
         let ffprobe = find_in_path("ffprobe", &path_entries).expect("ffprobe 未在 PATH 中检测到");
 
-        // 目录与文件名含空格、中文与括号
+        // 目录与文件名含空格、中文与括号；临时文件写入独立的应用临时目录
         let dir = temp_dir("success").join("测试 目录 (1)");
+        let app_tmp = temp_dir("success").join("encode-tmp");
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&app_tmp).unwrap();
         let input = dir.join("样片 [demo].mkv");
         let output = dir.join("样片 [demo].encoded.mkv");
         generate_input(&ffmpeg, &input, 2);
@@ -546,7 +557,7 @@ mod tests {
 
         let config = config_for("libx264", "veryfast", 23);
         let job_id = "e-test-success";
-        let temp = planner::temp_output_path(&output, job_id);
+        let temp = planner::temp_output_path(&app_tmp, &output, job_id);
         let args = planner::build_args(&config, &input, &temp).unwrap();
         let (_cancel_tx, cancel_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = collect_events();
@@ -594,6 +605,7 @@ mod tests {
         assert!(info.duration_secs.is_some_and(|d| d > 0.0));
 
         std::fs::remove_dir_all(dir).ok();
+        std::fs::remove_dir_all(app_tmp).ok();
     }
 
     /// 实机验证：输入不存在 → 失败，临时文件被清理，不产生成品。
@@ -606,7 +618,7 @@ mod tests {
         let output = dir.join("out.mkv");
 
         let config = config_for("libx264", "veryfast", 23);
-        let temp = planner::temp_output_path(&output, "e-test-failure");
+        let temp = planner::temp_output_path(&dir, &output, "e-test-failure");
         let args = planner::build_args(&config, &missing_input, &temp).unwrap();
         let (_cancel_tx, cancel_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = collect_events();
@@ -648,7 +660,7 @@ mod tests {
         generate_input(&ffmpeg, &input, 120);
 
         let config = config_for("libx264", "veryslow", 23);
-        let temp = planner::temp_output_path(&output, "e-test-cancel");
+        let temp = planner::temp_output_path(&dir, &output, "e-test-cancel");
         let args = planner::build_args(&config, &input, &temp).unwrap();
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = collect_events();
@@ -706,7 +718,7 @@ mod tests {
         std::fs::write(&output, "旧内容").unwrap();
 
         let config = config_for("libx264", "veryfast", 23);
-        let temp = planner::temp_output_path(&output, "e-test-overwrite");
+        let temp = planner::temp_output_path(&dir, &output, "e-test-overwrite");
         let args = planner::build_args(&config, &input, &temp).unwrap();
         let (_cancel_tx, cancel_rx) = watch::channel(false);
         let (event_tx, _event_rx) = collect_events();
@@ -760,7 +772,7 @@ mod tests {
         ] {
             let output = dir.join(format!("{encoder}-{preset}.mkv"));
             let config = config_for(encoder, preset, 21);
-            let temp = planner::temp_output_path(&output, "e-test-nvenc");
+            let temp = planner::temp_output_path(&dir, &output, "e-test-nvenc");
             let args = planner::build_args(&config, &input, &temp).unwrap();
             let (_cancel_tx, cancel_rx) = watch::channel(false);
             let (event_tx, _event_rx) = collect_events();

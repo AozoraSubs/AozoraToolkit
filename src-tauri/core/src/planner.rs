@@ -236,13 +236,10 @@ fn canonicalish(path: &Path) -> Option<PathBuf> {
     Some(parent_canon.join(name))
 }
 
-/// 任务专属临时输出路径：与最终输出同目录、同名干 + 任务 ID 标记，
-/// 扩展名保持不变（FFmpeg 依扩展名选择封装器）。
-pub fn temp_output_path(final_output: &Path, job_id: &str) -> PathBuf {
-    let parent = final_output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+/// 任务专属临时输出路径：位于应用自己的临时目录（由调用方提供，
+/// 保证可写），文件名沿用最终输出的主干 + 任务 ID 标记，扩展名保持
+/// 不变（FFmpeg 依扩展名选择封装器）。
+pub fn temp_output_path(temp_dir: &Path, final_output: &Path, job_id: &str) -> PathBuf {
     let stem = final_output
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -251,7 +248,43 @@ pub fn temp_output_path(final_output: &Path, job_id: &str) -> PathBuf {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("mkv");
-    parent.join(format!("{stem}.aozora-part-{job_id}.{ext}"))
+    temp_dir.join(format!("{stem}.aozora-part-{job_id}.{ext}"))
+}
+
+/// 清理临时目录中本应用遗留的临时输出（`*.aozora-part-*`，
+/// 崩溃/强杀残留，可能带只读属性）。
+pub fn clean_stale_temp_files(temp_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_ours = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(is_temp_output_name)
+            .unwrap_or(false);
+        if is_ours && path.is_file() {
+            clear_readonly(&path);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// 探测最终输出所在目录可写：在目标目录创建探针文件后删除，
+/// 不触碰最终输出文件本身。用于在开始压制前发现"目标目录不可写"，
+/// 避免 FFmpeg 编码完成后才发现无法收尾。
+pub fn verify_destination_writable(final_output: &Path, job_id: &str) -> Result<(), String> {
+    let parent = final_output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| format!("输出路径缺少父目录：{}", final_output.display()))?;
+    let stem = final_output
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "output".to_string());
+    let probe = parent.join(format!("{stem}.aozora-probe-{job_id}.tmp"));
+    verify_writable(&probe)
 }
 
 #[cfg(test)]
@@ -514,13 +547,42 @@ mod tests {
     }
 
     #[test]
-    fn temp_output_path_keeps_dir_and_extension() {
+    fn temp_output_path_uses_app_temp_dir_and_keeps_extension() {
+        let temp_dir = Path::new(r"C:\app\encode-tmp");
         let final_output = Path::new(r"D:\out\影片.mkv");
-        let temp = temp_output_path(final_output, "e-123");
-        assert_eq!(temp.parent(), Some(Path::new(r"D:\out")));
+        let temp = temp_output_path(temp_dir, final_output, "e-123");
+        assert_eq!(temp.parent(), Some(temp_dir));
+        assert_ne!(temp, Path::new(r"D:\out\影片.mkv"));
         let name = temp.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("影片.aozora-part-e-123"), "name: {name}");
         assert!(name.ends_with(".mkv"), "name: {name}");
-        assert_ne!(name, "影片.mkv");
+    }
+
+    #[test]
+    fn clean_stale_temp_files_removes_only_our_temps() {
+        let dir = temp_dir("stale-clean");
+        let ours = dir.join("out.aozora-part-e-9.mkv");
+        let other = dir.join("keep.mp4");
+        fs::write(&ours, "x").unwrap();
+        fs::write(&other, "y").unwrap();
+        clean_stale_temp_files(&dir);
+        assert!(!ours.exists(), "本应用临时文件应被清理");
+        assert!(other.exists(), "无关文件不应被删除");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn verify_destination_writable_probes_and_cleans() {
+        let dir = temp_dir("dest-probe");
+        let final_output = dir.join("out.mkv");
+        assert!(verify_destination_writable(&final_output, "e-1").is_ok());
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".aozora-probe-"))
+            .count();
+        assert_eq!(leftovers, 0, "探针文件应被删除");
+        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -11,6 +11,27 @@ use tokio::sync::{mpsc, watch};
 
 static JOB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// 压制临时目录：FFmpeg 先写入这里，成功后移动/复制到最终输出。
+///
+/// - dev 构建：可执行文件旁的 `encode-tmp`（软件目录下，保证可写）；
+/// - 发布构建：应用配置目录下的 `encode-tmp`（安装目录 Program Files
+///   不可写，配置目录是应用自有的可写位置）。
+#[cfg_attr(dev, allow(unused_variables))]
+fn encode_temp_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(dev)]
+    {
+        Ok(crate::exe_dir().join("encode-tmp"))
+    }
+    #[cfg(not(dev))]
+    {
+        use tauri::Manager;
+        app.path()
+            .app_config_dir()
+            .map(|dir| dir.join("encode-tmp"))
+            .map_err(|e| format!("无法获取应用配置目录：{e}"))
+    }
+}
+
 /// 生成任务 ID：时间戳 + 递增计数器，仅含文件名安全字符。
 fn next_job_id() -> String {
     let nanos = std::time::SystemTime::now()
@@ -73,11 +94,17 @@ pub async fn start_job(
         "未检测到可用的 FFmpeg，无法开始压制。请安装 FFmpeg 或在设置中指定路径。".to_string()
     })?;
 
-    // 4. 生成参数数组与任务专属临时输出路径；启动前探测输出位置可写，
-    //    把"权限不足"类问题在开始任务前以可读方式报告给用户。
+    // 4. 生成参数数组与任务专属临时输出路径（应用自己的临时目录），
+    //    并在启动前完成可写性探测：应用临时目录 + 最终输出目录。
+    //    这样"权限不足"类问题会在开始任务前以可读方式报告给用户。
     let job_id = next_job_id();
-    let temp_path = planner::temp_output_path(&output, &job_id);
+    let temp_dir = encode_temp_dir(&app)?;
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("创建压制临时目录失败（{}）：{e}", temp_dir.display()))?;
+    planner::clean_stale_temp_files(&temp_dir);
+    let temp_path = planner::temp_output_path(&temp_dir, &output, &job_id);
     planner::verify_writable(&temp_path)?;
+    planner::verify_destination_writable(&output, &job_id)?;
     let args = planner::build_args(&config, &input, &temp_path)?;
 
     // 5. 注册活动任务
