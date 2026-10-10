@@ -89,7 +89,9 @@
 - Tauri 2 所需的系统构建依赖
 - FFmpeg / FFprobe（开发期间可使用本机安装版本）
 
-Windows 构建说明：推荐安装 MSVC Build Tools（含 C++ 桌面开发负载）。若使用 GNU 工具链（`x86_64-pc-windows-gnu`），需要额外把 mingw-w64 binutils（`dlltool`、`ar`、`windres` 等）加入 `PATH`，因为部分依赖的构建脚本会直接调用 `dlltool`，且 build.rs 会用 `windres` 生成应用清单；项目已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器的导出序号上限问题。
+Windows 构建说明：**推荐使用 MSVC 工具链**（`x86_64-pc-windows-msvc` + Visual Studio Build Tools 的 C++ 桌面开发负载）。MSVC 构建下 WebView2 加载器会被静态链接进可执行文件——**无需在 exe 旁附带 `WebView2Loader.dll`**，且产物显著更小。GNU 工具链（`x86_64-pc-windows-gnu`）仍受支持，但受上游限制无法静态链接加载器，必须保留 exe 旁的 `WebView2Loader.dll`；此外需要把 mingw-w64 binutils（`dlltool`、`ar`、`windres` 等）加入 `PATH`（部分依赖的构建脚本会直接调用 `dlltool`，build.rs 会用 `windres` 生成应用清单）。项目已移除桌面版不需要的 `cdylib` crate-type 以避免 GNU 链接器的导出序号上限问题。
+
+国内网络加速（可选，用户级配置）：rustup 与 crates.io 可走清华 TUNA 镜像——设置用户环境变量 `RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup`、`RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup`，并在 `~/.cargo/config.toml` 中把 `crates-io` 替换为 `sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/`。
 
 **受限/沙箱工作区提示（Windows）：** 如果工作区根目录带有"低完整性"标记（`Mandatory Label\Low Mandatory Level`，某些沙箱环境会自动施加），仓库内编译出的 `aozora-encode.exe` 会继承该标记，应用进程只能写工作区、无法写桌面/下载/D 盘等正常位置（表现为此类位置报"拒绝访问"，而 PowerShell 等正常进程不受影响）。这并非项目或 Tauri 的问题——任何复制进该目录的 exe 都会继承同一标记。修复（机器级，按需执行一次）：
 

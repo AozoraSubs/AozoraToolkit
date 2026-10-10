@@ -252,6 +252,14 @@
 - **PLAN 更新：** 无清单勾选变化；本条目记录体验修复与 MSVC 切换的当前状态。
 - **剩余工作：** M3（预设与队列）；待用户环境就绪后继续 MSVC 静态整合。
 
+### 2026-10-10（环境切换）：MSVC 工具链 + 清华源，WebView2Loader 静态链接达成
+
+- **本次完成：** 用户完全重装 Rust 环境为 `stable-x86_64-pc-windows-msvc`。验证结果：**MSVC 构建的 exe 不再导入 WebView2Loader.dll（加载器静态链接进可执行文件），exe 体积从 GNU 调试构建的 233.6 MB 降至 13.8 MB，exe 旁与 deps 目录均无该 DLL**——官方结论（仅 MSVC 可静态链接加载器）属实。应用在无 DLL 环境下直接启动正常（窗口 + 24 个 WebView2 子进程）。同时按用户要求把 Rust 源切换为清华 TUNA 镜像（用户级：`RUSTUP_DIST_SERVER` / `RUSTUP_UPDATE_ROOT` 环境变量 + `~/.cargo/config.toml` 的 sparse 索引替换，不入库；`cargo update --dry-run` 实测从 TUNA 索引解析成功）。
+- **验证方式与结果（全部实际执行，MSVC 工具链）：** `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（含 v6 清单冒烟测试，MSVC 的 embed_resource 路径验证通过）、集成测试 10/10；前端 `pnpm check/lint/format:check/test/build` 全绿；`pnpm tauri dev` 冒烟（窗口正常）。
+- **说明：** rust-toolchain.toml 保持 `channel = "stable"`（主机无关）；本机默认主机为 msvc，CI Windows 默认也是 msvc，macOS/Linux 不受影响。GNU 分支代码保留（含 DLL 行为，上游限制）；`copy_webview2_loader_for_tests` 在 MSVC 下自动 no-op。target 树内 `build\webview2-com-sys-*\out\` 下的 DLL 为 crate 构建暂存，不随应用分发。
+- **PLAN 更新：** 无清单勾选变化；README Windows 构建说明改为 MSVC 优先并补充清华源配置。
+- **剩余工作：** M3（预设与队列）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
