@@ -219,6 +219,13 @@
 - **PLAN 更新：** 无清单勾选变化（M2 缺陷修复）；§6.4 补充"目标目录不可写时回退到应用临时目录"。
 - **剩余工作：** 用户重试确认回退提示与成品位置符合预期。
 
+### 2026-10-10（M2 环境修复）：应用进程低完整性导致的写入受限
+
+- **本次完成：** 应用进程自检报告（新增 `diagnostics` 模块，目标目录不可写时在提示中列出进程对常见目录的实测可写性）定位根因：**工作区根目录带 `Mandatory Label\Low Mandatory Level:(OI)(CI)(NW)`，仓库内新建的任何文件（包括 cargo 编译的 `aozora-encode.exe`）都继承低完整性标记；Windows 启动该 exe 后进程为低完整性，只能写工作区内低完整性位置，写桌面/Downloads/D 盘/%TEMP%（默认中完整性）一律"拒绝访问 (os error 5)"**——与用户 PowerShell 可写、应用被拒的现象完全一致（也解释了 M1 时期 WebView2 数据目录写 %LOCALAPPDATA% 失败的 dev 临时方案）。修复（机器级，不入库）：`icacls src-tauri\target /setintegritylevel (CI)(OI)M`（带继承，此后编译产物均为中完整性）+ 对现有 exe 单独改标；实测新启动的应用进程完整性为 S-1-16-8192（中）。若工作区被环境重置需重新执行该命令。
+- **验证方式与结果（全部实际执行）：** 标签继承实验（新建文件自动 Low）✓；改标后 exe 为 Medium ✓；启动应用后进程完整性实测 S-1-16-8192 ✓；`cargo fmt --check`、`clippy --all-targets --all-features -- -D warnings`、`cargo test --workspace`（58 单元，新增 diagnostics 用例）全部通过。
+- **PLAN 更新：** 无清单勾选变化；本条目记录环境修复命令与机制说明。
+- **剩余工作：** 用户重启 tauri dev 后确认可直接写入桌面/D 盘；M3（预设与队列）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
