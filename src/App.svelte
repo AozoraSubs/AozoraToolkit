@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
+  import brandMark from "./lib/assets/brand-mark.png";
   import EncodePage from "./lib/pages/EncodePage.svelte";
   import JobsPage from "./lib/pages/JobsPage.svelte";
   import PresetsPage from "./lib/pages/PresetsPage.svelte";
@@ -81,7 +82,7 @@
 <div class="shell">
   <nav class="sidebar" aria-label="主导航">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">Ao</span>
+      <img class="brand-mark" src={brandMark} alt="" />
       <div>
         <div class="brand-name">Aozora Encode</div>
         <div class="brand-sub">本地视频压制工具箱</div>
@@ -145,14 +146,9 @@
   }
 
   .brand-mark {
-    display: grid;
-    place-items: center;
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: var(--color-accent);
-    color: var(--color-accent-contrast);
-    font-weight: 700;
   }
 
   .brand-name {
