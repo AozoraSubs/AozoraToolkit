@@ -239,6 +239,19 @@
 - **PLAN 更新：** M4 清单新增"字幕处理选项"并勾选（原"字幕轨映射与保留策略"保持未勾选，指按轨精细映射）；§11 M4 同步。
 - **剩余工作：** 回到 M3（预设与队列）。
 
+### 2026-10-10（体验修复批）：控制台弹窗、切页进度、探测卡顿与重复探测
+
+- **本次完成（用户提出 6 项中的 5 项）：**
+  1. **隐藏子进程控制台窗口**：新增 `process_flags`（Windows 下 CREATE_NO_WINDOW），应用于所有 ffmpeg/ffprobe 启动点（版本检测、能力检测、媒体探测、压制运行器），不再弹终端窗口；
+  2. **切页进度不丢失**：任务状态提升为全局 store（`stores/jobs.svelte.ts`），事件监听统一移到常驻的 App.svelte，压制页读全局状态——压制中切到其他页面再返回，进度/日志/结果完整保留；
+  3. **探测命令异步化**：`detect_tools` / `detect_capabilities` / `probe_media_file` 改为 async 命令并在 `spawn_blocking` 中执行，不再阻塞 Tauri 主线程（消除设置页与选文件时的界面卡死）；
+  4. **选文件卡顿**：同 3（探测不再同步阻塞）；
+  5. **探测结果会话级缓存**：新增 `stores/tools.svelte.ts`，检测结果只探测一次；设置页进入即展示缓存，提供「重新检测」按钮强制刷新（保存自定义路径后自动强制刷新）。
+- **验证方式与结果（全部实际执行）：** `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`、集成测试 10/10 全部通过；前端 `pnpm check/lint/format:check/test/build` 全绿；`pnpm tauri dev` 冒烟（窗口正常、进程稳定）。
+- **搁置（第 6 项 WebView2Loader.dll 静态整合）：** 官方结论为仅 MSVC 目标可静态链接加载器。本机已安装 VS Build Tools 与 MSVC Rust 工具链，但会话内 rustup 下载组件失败、且 `rustup set default-host` 中断导致 MSVC 工具链组件不完整；按用户指示暂停，恢复 GNU 工具链继续开发。恢复路径：在外部终端执行 `rustup toolchain install stable-x86_64-pc-windows-msvc` + `rustup set default-host x86_64-pc-windows-msvc`（或直接 `rustup default` 切换）后重新验证；MSVC 下仍需验证静态库链接方案（导入库替换实验已确认 GNU 可静态链接但存在运行时问题，MSVC 路径待验证）。
+- **PLAN 更新：** 无清单勾选变化；本条目记录体验修复与 MSVC 切换的当前状态。
+- **剩余工作：** M3（预设与队列）；待用户环境就绪后继续 MSVC 静态整合。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
