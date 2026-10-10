@@ -217,7 +217,9 @@ fn build_result(file_path: &Path, output: &FfprobeOutput) -> MediaProbeResult {
 
 /// 用 FFprobe 探测媒体文件并解析 JSON 结果。
 pub fn probe_media(ffprobe_path: &Path, file_path: &Path) -> Result<MediaProbeResult, String> {
-    let output = Command::new(ffprobe_path)
+    let mut command = Command::new(ffprobe_path);
+    crate::process_flags::hide_console_std(&mut command);
+    let output = command
         .args([
             "-v",
             "error",

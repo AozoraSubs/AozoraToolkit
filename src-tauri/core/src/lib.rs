@@ -10,5 +10,6 @@ pub mod job;
 pub mod media_probe;
 pub mod planner;
 pub mod probe;
+pub mod process_flags;
 pub mod progress;
 pub mod settings;

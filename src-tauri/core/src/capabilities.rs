@@ -26,7 +26,9 @@ pub struct CapabilityReport {
 }
 
 fn run_lines(ffmpeg_path: &Path, args: &[&str]) -> Result<Vec<String>, String> {
-    let output = Command::new(ffmpeg_path)
+    let mut command = Command::new(ffmpeg_path);
+    crate::process_flags::hide_console_std(&mut command);
+    let output = command
         .args(args)
         .output()
         .map_err(|e| format!("无法启动 {}：{e}", ffmpeg_path.display()))?;

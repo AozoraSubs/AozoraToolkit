@@ -201,7 +201,9 @@ pub async fn run_encode(
         let _ = std::fs::remove_file(&request.temp_path);
     }
 
-    let mut child = match Command::new(&request.ffmpeg_path)
+    let mut ffmpeg_command = Command::new(&request.ffmpeg_path);
+    crate::process_flags::hide_console_tokio(&mut ffmpeg_command);
+    let mut child = match ffmpeg_command
         .args(&request.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

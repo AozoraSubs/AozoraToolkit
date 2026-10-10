@@ -58,7 +58,9 @@ pub fn app_bin_dir() -> Option<PathBuf> {
 
 /// 运行 `tool -version` 验证工具可用并返回首行输出（版本横幅）。
 pub fn validate_tool(path: &Path) -> Result<String, String> {
-    let output = Command::new(path)
+    let mut command = Command::new(path);
+    crate::process_flags::hide_console_std(&mut command);
+    let output = command
         .arg("-version")
         .output()
         .map_err(|e| format!("无法启动 {}：{e}", path.display()))?;
