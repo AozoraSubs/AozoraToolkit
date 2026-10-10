@@ -27,6 +27,8 @@ export interface CapabilityReport {
   encoders: KnownEncoders;
   encoderCount: number;
   filterCount: number;
+  /** 是否有 subtitles 滤镜（libass）——外部字幕烧录依赖它。 */
+  hasSubtitlesFilter: boolean;
   hwAccels: string[];
   warnings: string[];
 }

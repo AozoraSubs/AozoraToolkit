@@ -28,6 +28,7 @@
   // 编码能力与表单状态（能力结果在全局缓存，避免反复探测）
   let video = $state<VideoConfig>(defaultVideoConfig("libx264"));
   let subtitleMode = $state<SubtitleMode>("drop");
+  let subtitlePath = $state("");
   let outputPath = $state("");
   let overwrite = $state(false);
   let formError = $state<string | null>(null);
@@ -56,9 +57,25 @@
       schemaVersion: 1,
       video,
       audio: { mode: "copy" },
-      subtitles: { mode: subtitleMode },
+      subtitles: {
+        mode: subtitleMode,
+        externalPath: subtitleMode === "burn" ? subtitlePath : null,
+      },
       output: { path: outputPath, overwrite },
     };
+  }
+
+  async function pickSubtitleFile() {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      title: "选择要烧录的字幕文件",
+      filters: [{ name: "字幕文件", extensions: ["srt", "ass"] }],
+    });
+    if (typeof selected === "string") {
+      subtitlePath = selected;
+      await refreshPreview();
+    }
   }
 
   function resetJob() {
@@ -157,6 +174,10 @@
     }
     if (!isAvailable(video.encoderId)) {
       formError = `当前 FFmpeg 构建不支持编码器 ${video.encoderId}`;
+      return;
+    }
+    if (subtitleMode === "burn" && !subtitlePath.trim()) {
+      formError = "烧录字幕需要先选择外部字幕文件（srt / ass）";
       return;
     }
     formError = null;
@@ -338,8 +359,20 @@
           >
             <option value="drop">丢弃字幕</option>
             <option value="copy">保留全部字幕轨</option>
+            <option
+              value="burn"
+              disabled={capabilities !== null &&
+                !capabilities.hasSubtitlesFilter}
+            >
+              烧录外部字幕（srt / ass）
+              {capabilities !== null && !capabilities.hasSubtitlesFilter
+                ? "（当前 FFmpeg 无 libass）"
+                : ""}
+            </option>
           </select>
-          {#if info && info.subtitleStreams.length === 0}
+          {#if subtitleMode === "burn"}
+            <span class="field-hint">字幕将被渲染进画面，成为视频的一部分</span>
+          {:else if info && info.subtitleStreams.length === 0}
             <span class="field-hint">源文件无字幕轨</span>
           {:else if subtitleMode === "copy" && /\.mp4$/i.test(outputPath)}
             <span class="field-hint">
@@ -348,6 +381,33 @@
           {/if}
         </label>
       </div>
+
+      {#if subtitleMode === "burn"}
+        <div class="form-grid">
+          <label class="field wide">
+            <span class="field-label">外部字幕文件</span>
+            <div class="row">
+              <input
+                type="text"
+                bind:value={subtitlePath}
+                placeholder="选择要烧录的字幕文件（.srt / .ass）"
+                disabled={!!job && !job.finished}
+                onchange={() => void refreshPreview()}
+              />
+              <button
+                type="button"
+                onclick={pickSubtitleFile}
+                disabled={!!job && !job.finished}
+              >
+                浏览…
+              </button>
+            </div>
+            {#if !subtitlePath.trim()}
+              <span class="field-hint">请选择字幕文件后再开始压制</span>
+            {/if}
+          </label>
+        </div>
+      {/if}
 
       <div class="form-grid">
         <label class="field wide">
@@ -615,8 +675,8 @@
         </table>
       {/if}
       <p class="hint">
-        说明：音频全部复制原音轨；字幕可选保留（复制全部字幕轨）或丢弃；章节与附件暂不处理（M4
-        实现）。
+        说明：音频全部复制原音轨；字幕可选保留（复制全部字幕轨）、丢弃或烧录外部
+        srt/ass 文件；章节与附件暂不处理（M4 实现）。
       </p>
     </section>
   {/if}

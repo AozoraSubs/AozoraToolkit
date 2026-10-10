@@ -2,7 +2,7 @@ import type { KnownEncoders } from "./tools";
 
 export type QualityMode = "crf" | "cq";
 export type AudioMode = "copy";
-export type SubtitleMode = "copy" | "drop";
+export type SubtitleMode = "copy" | "drop" | "burn";
 
 export interface VideoConfig {
   encoderId: string;
@@ -17,8 +17,10 @@ export interface AudioConfig {
 }
 
 export interface SubtitleConfig {
-  /** copy：保留全部字幕轨；drop：丢弃字幕。 */
+  /** copy：保留全部字幕轨；drop：丢弃字幕；burn：烧录外部字幕文件。 */
   mode: SubtitleMode;
+  /** burn 模式下要烧录的外部字幕文件路径（srt / ass）。 */
+  externalPath: string | null;
 }
 
 export interface OutputConfig {
