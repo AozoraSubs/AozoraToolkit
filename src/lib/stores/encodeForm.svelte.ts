@@ -78,11 +78,18 @@ export function resetVideoForEncoder(encoderId: string) {
   encodeForm.video = defaultVideoConfig(encoderId);
 }
 
-/** 应用预设：覆盖视频参数、字幕模式与覆盖策略；输出路径保持用户已选值。 */
+/**
+ * 应用预设：覆盖视频参数、字幕模式与覆盖策略；输出路径保持用户已选值。
+ *
+ * 预设不保存外部字幕文件路径（与机器相关）：烧录模式的预设保留用户当前
+ * 已选择的字幕文件，避免"应用预设后字幕文件被清空"。
+ */
 export function applyPreset(preset: Preset): void {
   encodeForm.video = { ...preset.video };
   encodeForm.subtitleMode = preset.subtitles.mode;
-  encodeForm.subtitlePath = preset.subtitles.externalPath ?? "";
+  if (preset.subtitles.mode !== "burn") {
+    encodeForm.subtitlePath = "";
+  }
   encodeForm.overwrite = preset.output.overwrite;
   if (!encodeForm.outputPath.trim() && encodeForm.info) {
     encodeForm.outputPath = suggestOutputPath(encodeForm.info.filePath);

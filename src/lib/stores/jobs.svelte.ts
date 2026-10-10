@@ -25,6 +25,8 @@ export const jobState = $state<{
   history: JobRecord[];
   historyError: string | null;
   historyLoading: boolean;
+  /** 队列事件序号：用于避免较旧的快照覆盖较新的事件状态。 */
+  queueSeq: number;
 }>({
   job: null,
   elapsed: 0,
@@ -33,7 +35,34 @@ export const jobState = $state<{
   history: [],
   historyError: null,
   historyLoading: false,
+  queueSeq: 0,
 });
+
+/** 由队列元数据构造运行中任务的占位状态（事件丢失或界面重载时兜底）。 */
+function placeholderJob(meta: JobMeta): ActiveJobUi {
+  return {
+    id: meta.id,
+    name: meta.name,
+    inputPath: meta.inputPath,
+    startedAt: Date.now(),
+    notice: null,
+    percent: 0,
+    outTimeSecs: 0,
+    // 时长未知，不显示误导性的百分比
+    durationKnown: false,
+    durationSecs: null,
+    speed: null,
+    fps: null,
+    etaSecs: null,
+    logs: [],
+    finished: false,
+    status: null,
+    error: null,
+    outputPath: null,
+    elapsedSecs: 0,
+    historyError: null,
+  };
+}
 
 /** 队列中是否还有等待运行的任务。 */
 export function hasQueuedJobs(): boolean {
@@ -107,8 +136,16 @@ export function onJobFinished(payload: JobFinishedEvent) {
 
 /** 队列快照（入队 / 启动 / 结束 / 移除时由后端推送）。 */
 export function onJobQueue(payload: QueueSnapshot) {
+  jobState.queueSeq += 1;
   jobState.queue = payload.queued;
   jobState.activeMeta = payload.active;
+  // 事件丢失或界面重载时兜底：队列显示有运行中任务，但界面没有对应状态
+  if (payload.active && jobState.job?.id !== payload.active.id) {
+    if (!jobState.job || jobState.job.finished) {
+      jobState.job = placeholderJob(payload.active);
+      jobState.elapsed = 0;
+    }
+  }
 }
 
 /** 由外部定时器调用：刷新运行中任务的已用时间。 */
@@ -130,21 +167,30 @@ export function clearFinishedJob() {
 /** 主动同步队列状态（界面初始化时调用一次）。 */
 export async function refreshQueue(): Promise<void> {
   try {
+    // 记录请求前的序号：await 期间若有更新的队列事件到达，丢弃这份较旧的快照
+    const seq = jobState.queueSeq;
     const snapshot = await invoke<QueueSnapshot>("queue_snapshot");
+    if (jobState.queueSeq !== seq) {
+      return;
+    }
     onJobQueue(snapshot);
   } catch {
     // 队列快照失败不阻塞界面；后续事件仍会更新
   }
 }
 
-/** 读取任务历史。 */
+/**
+ * 读取任务历史。
+ *
+ * 读取失败（文件损坏或版本不受支持）时保留上一次已知良好的列表，
+ * 只设置错误信息——避免界面看起来像"历史被清空了"。
+ */
 export async function refreshHistory(): Promise<void> {
   jobState.historyLoading = true;
   try {
     jobState.history = await invoke<JobRecord[]>("list_job_history");
     jobState.historyError = null;
   } catch (err) {
-    jobState.history = [];
     jobState.historyError = err instanceof Error ? err.message : String(err);
   } finally {
     jobState.historyLoading = false;

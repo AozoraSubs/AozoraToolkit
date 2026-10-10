@@ -2,6 +2,7 @@ import { builtinPresetFixture, presetFixture } from "./testFixtures";
 import {
   copyName,
   presetEncoderAvailable,
+  presetFileName,
   presetSummary,
   presetToInput,
 } from "./presets";
@@ -78,5 +79,15 @@ describe("copyName", () => {
     expect(copyName("HEVC", [])).toBe("HEVC 副本");
     expect(copyName("HEVC", ["hevc 副本"])).toBe("HEVC 副本 2");
     expect(copyName("HEVC", ["HEVC 副本", "HEVC 副本 2"])).toBe("HEVC 副本 3");
+  });
+});
+
+describe("presetFileName", () => {
+  it("sanitises illegal filename characters", () => {
+    expect(presetFileName("HEVC 高画质")).toBe("HEVC 高画质.json");
+    expect(presetFileName('a:b*c?d"e<f>g|h\\i/j')).toBe(
+      "a_b_c_d_e_f_g_h_i_j.json",
+    );
+    expect(presetFileName("   ")).toBe("preset.json");
   });
 });

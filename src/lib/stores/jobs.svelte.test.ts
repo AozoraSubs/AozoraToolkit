@@ -17,7 +17,9 @@ import {
 } from "./jobs.svelte";
 import type { JobStartedEvent } from "../types/encode";
 
-function startedEvent(overrides: Partial<JobStartedEvent> = {}): JobStartedEvent {
+function startedEvent(
+  overrides: Partial<JobStartedEvent> = {},
+): JobStartedEvent {
   return {
     jobId: "e-1",
     name: "样片.mkv",

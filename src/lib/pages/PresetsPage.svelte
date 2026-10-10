@@ -4,6 +4,7 @@
   import {
     copyName,
     presetEncoderAvailable,
+    presetFileName,
     presetSummary,
     presetToInput,
   } from "../presets";
@@ -70,7 +71,7 @@
     notice = null;
     const target = await save({
       title: "导出预设",
-      defaultPath: `${preset.name}.json`,
+      defaultPath: presetFileName(preset.name),
       filters: [{ name: "预设 JSON", extensions: ["json"] }],
     });
     if (typeof target !== "string") {

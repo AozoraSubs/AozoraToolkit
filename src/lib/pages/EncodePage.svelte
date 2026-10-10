@@ -228,8 +228,10 @@
     }
   }
 
-  async function applySelectedPreset() {
-    const preset = presetById(presetSelectId);
+  async function applySelectedPreset(event: Event) {
+    // 直接读取选择框的值，不依赖 bind 与 onchange 的触发顺序
+    const select = event.currentTarget as HTMLSelectElement;
+    const preset = presetById(select.value);
     presetSelectId = "";
     if (!preset) {
       return;
@@ -578,8 +580,9 @@
           <button type="button" onclick={copyCommand}>复制命令</button>
         </div>
         <p class="field-hint">
-          全部参数由应用自动生成（无用户自定义参数）；实际执行时 FFmpeg
-          先写入应用临时目录，成功后移动到输出路径。
+          全部参数由应用自动生成（无用户自定义参数）。注意：这里是便于阅读的
+          近似命令——直接运行会写入上面的输出路径；应用执行时会先写入应用
+          临时目录，成功后移动到输出路径，目标目录不可写时成品会落在临时目录。
         </p>
         <details class="args">
           <summary>逐项参数</summary>
@@ -857,12 +860,11 @@
 
   {#if !info}
     <div class="placeholder">
-      <strong>M3：预设与队列</strong>
+      <strong>使用提示</strong>
       <ul>
-        <li>预设保存 / 重命名 / 删除 / 导入导出（含内置示例预设）</li>
-        <li>任务队列：同时只运行一个任务，其余排队等待</li>
-        <li>任务历史持久化，失败任务可查看日志并载入配置重试</li>
-        <li>命令预览与一键复制</li>
+        <li>拖放或点击上方区域导入视频文件（MKV / MP4 / MOV 等）</li>
+        <li>可以在「预设」页挑选内置示例预设，或把当前参数保存为预设</li>
+        <li>任务按队列逐个运行，可在「任务」页查看进度、日志与历史记录</li>
       </ul>
     </div>
   {/if}

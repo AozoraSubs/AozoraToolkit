@@ -26,6 +26,10 @@
 
   const job = $derived(jobState.job);
   const jobRunning = $derived(!!job && !job.finished);
+  // 历史文件损坏或版本不受支持时，允许清空（重置）而不是让用户无从下手
+  const canClearHistory = $derived(
+    jobState.history.length > 0 || jobState.historyError !== null,
+  );
 
   onMount(() => {
     void refreshQueue();
@@ -133,7 +137,7 @@
         type="button"
         class="danger"
         onclick={() => void clearAll()}
-        disabled={jobState.history.length === 0}
+        disabled={!canClearHistory}
         >确认清空历史（{jobState.history.length} 条）</button
       >
       <button type="button" onclick={() => (confirmClear = false)}>取消</button>
@@ -142,9 +146,9 @@
         type="button"
         class="danger"
         onclick={() => (confirmClear = true)}
-        disabled={jobState.history.length === 0}
+        disabled={!canClearHistory}
       >
-        清空历史
+        {jobState.historyError ? "重置历史文件" : "清空历史"}
       </button>
     {/if}
     <span class="toolbar-hint"

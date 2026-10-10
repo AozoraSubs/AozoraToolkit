@@ -60,3 +60,12 @@ export function copyName(base: string, existing: string[]): string {
     index += 1;
   }
 }
+
+/** 导出预设时的建议文件名（去掉 Windows 文件名非法字符）。 */
+export function presetFileName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${cleaned || "preset"}.json`;
+}
