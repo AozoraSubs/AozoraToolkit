@@ -1,5 +1,6 @@
 use crate::jobs::{ActiveJob, JobFinishedDto, JobLogDto, JobProgressDto, JobStartedDto, JobState};
 use crate::settings;
+use aozora_core::diagnostics;
 use aozora_core::encode::{self, EncodeConfig};
 use aozora_core::job::{run_encode, EncodeEvent, EncodeRequest};
 use aozora_core::media_probe;
@@ -30,6 +31,31 @@ fn encode_temp_dir(app: &AppHandle) -> Result<PathBuf, String> {
             .map(|dir| dir.join("encode-tmp"))
             .map_err(|e| format!("无法获取应用配置目录：{e}"))
     }
+}
+
+/// 目标目录不可写时，附带一份"进程可写性自检"报告到提示文本：
+/// 列出当前应用进程在常见目录（临时目录、用户目录、桌面、Downloads、
+/// D 盘、软件目录）的实际可写性，帮助一次性定位是进程级限制还是目录权限。
+fn destination_unwritable_notice(
+    destination_error: &str,
+    destination_dir: &Path,
+    temp_dir: &Path,
+) -> String {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.push(destination_dir.to_path_buf());
+    candidates.push(temp_dir.to_path_buf());
+    candidates.push(std::env::temp_dir());
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        candidates.push(PathBuf::from(&profile));
+        candidates.push(PathBuf::from(&profile).join("Desktop"));
+        candidates.push(PathBuf::from(&profile).join("Downloads"));
+    }
+    if Path::new("D:\\").exists() {
+        candidates.push(PathBuf::from("D:\\"));
+    }
+    let report =
+        diagnostics::format_write_access_report(&diagnostics::write_access_report(&candidates));
+    format!("目标目录不可写，成品将保存到应用临时目录：{destination_error}\n{report}")
 }
 
 /// 生成任务 ID：时间戳 + 递增计数器，仅含文件名安全字符。
@@ -110,9 +136,16 @@ pub async fn start_job(
             Ok(()) => (output.clone(), None, config.output.overwrite),
             Err(destination_error) => {
                 // 回退到应用临时目录：覆盖同名回退成品（应用自有目录），
-                // 并告知用户目标目录不可写的原因。
-                let notice = Some(format!(
-                    "目标目录不可写，成品将保存到应用临时目录：{destination_error}"
+                // 并告知用户目标目录不可写的原因 + 进程可写性自检报告。
+                let destination_dir = output
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf();
+                let notice = Some(destination_unwritable_notice(
+                    &destination_error,
+                    &destination_dir,
+                    &temp_dir,
                 ));
                 (
                     planner::fallback_output_path(&temp_dir, &output),

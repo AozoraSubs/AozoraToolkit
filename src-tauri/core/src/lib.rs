@@ -4,6 +4,7 @@
 //! 独立运行，不会因链接 WebView2 原生库而失败。
 
 pub mod capabilities;
+pub mod diagnostics;
 pub mod encode;
 pub mod job;
 pub mod media_probe;
