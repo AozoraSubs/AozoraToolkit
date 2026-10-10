@@ -23,6 +23,8 @@ pub struct JobState {
 #[serde(rename_all = "camelCase")]
 pub struct JobStartedDto {
     pub job_id: String,
+    /// 需要提醒用户的事项（例如目标目录不可写、已回退到应用临时目录）。
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

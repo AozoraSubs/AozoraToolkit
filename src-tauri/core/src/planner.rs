@@ -287,6 +287,20 @@ pub fn verify_destination_writable(final_output: &Path, job_id: &str) -> Result<
     verify_writable(&probe)
 }
 
+/// 目标目录不可写时的回退成品路径：应用临时目录内、沿用最终输出的
+/// 文件名。应用临时目录由应用独占且保证可写（沙箱/受限环境下也能用）。
+pub fn fallback_output_path(temp_dir: &Path, final_output: &Path) -> PathBuf {
+    let stem = final_output
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "output".to_string());
+    let ext = final_output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mkv");
+    temp_dir.join(format!("{stem}.{ext}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +598,13 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0, "探针文件应被删除");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fallback_output_path_uses_temp_dir_with_same_name() {
+        let temp_dir = Path::new(r"C:\app\encode-tmp");
+        let final_output = Path::new(r"D:\影片\样片.encoded.mkv");
+        let fallback = fallback_output_path(temp_dir, final_output);
+        assert_eq!(fallback, Path::new(r"C:\app\encode-tmp\样片.encoded.mkv"));
     }
 }

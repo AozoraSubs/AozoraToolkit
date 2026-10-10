@@ -96,7 +96,8 @@ pub async fn start_job(
 
     // 4. 生成参数数组与任务专属临时输出路径（应用自己的临时目录），
     //    并在启动前完成可写性探测：应用临时目录 + 最终输出目录。
-    //    这样"权限不足"类问题会在开始任务前以可读方式报告给用户。
+    //    目标目录不可写时（例如受限/沙箱环境）回退到应用临时目录，
+    //    保证压制始终可以完成，并通过 notice 明确告知用户成品位置。
     let job_id = next_job_id();
     let temp_dir = encode_temp_dir(&app)?;
     std::fs::create_dir_all(&temp_dir)
@@ -104,7 +105,22 @@ pub async fn start_job(
     planner::clean_stale_temp_files(&temp_dir);
     let temp_path = planner::temp_output_path(&temp_dir, &output, &job_id);
     planner::verify_writable(&temp_path)?;
-    planner::verify_destination_writable(&output, &job_id)?;
+    let (final_path, fallback_notice, overwrite) =
+        match planner::verify_destination_writable(&output, &job_id) {
+            Ok(()) => (output.clone(), None, config.output.overwrite),
+            Err(destination_error) => {
+                // 回退到应用临时目录：覆盖同名回退成品（应用自有目录），
+                // 并告知用户目标目录不可写的原因。
+                let notice = Some(format!(
+                    "目标目录不可写，成品将保存到应用临时目录：{destination_error}"
+                ));
+                (
+                    planner::fallback_output_path(&temp_dir, &output),
+                    notice,
+                    true,
+                )
+            }
+        };
     let args = planner::build_args(&config, &input, &temp_path)?;
 
     // 5. 注册活动任务
@@ -157,8 +173,8 @@ pub async fn start_job(
                 args,
                 input_path: input,
                 temp_path,
-                final_path: output.clone(),
-                overwrite: config.output.overwrite,
+                final_path,
+                overwrite,
                 duration_secs,
                 cancel: cancel_rx,
             },
@@ -188,6 +204,7 @@ pub async fn start_job(
         "job:started",
         JobStartedDto {
             job_id: job_id.clone(),
+            notice: fallback_notice,
         },
     );
     Ok(job_id)

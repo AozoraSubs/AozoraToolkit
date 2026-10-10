@@ -169,6 +169,7 @@
     job = {
       id: "",
       startedAt: Date.now(),
+      notice: null,
       percent: 0,
       outTimeSecs: 0,
       durationKnown: info.durationSecs !== null,
@@ -234,6 +235,7 @@
         if (job) {
           job.id = payload.jobId;
           job.startedAt = Date.now();
+          job.notice = payload.notice;
         }
       }),
     );
@@ -485,6 +487,9 @@
   {#if job && !job.finished}
     <section class="card">
       <h2>压制进行中</h2>
+      {#if job.notice}
+        <div class="notice" role="status">{job.notice}</div>
+      {/if}
       <div class="progress-track">
         <div class="progress-fill" style:width="{job.percent}%"></div>
       </div>
@@ -536,6 +541,9 @@
           <span class="path" title={job.outputPath ?? ""}>{job.outputPath}</span
           >
         </p>
+        {#if job.notice}
+          <div class="notice" role="status">{job.notice}</div>
+        {/if}
       {:else if job.status === "failed"}
         <div class="errors" role="alert">
           <strong>压制失败</strong>
@@ -930,6 +938,17 @@
   .form-error {
     margin: 8px 0 0;
     color: var(--color-danger);
+  }
+
+  .notice {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-warning, var(--color-border));
+    border-radius: 6px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 13px;
+    word-break: break-all;
   }
 
   .streams {

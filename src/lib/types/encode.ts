@@ -32,6 +32,8 @@ export type JobStatus = "completed" | "failed" | "cancelled";
 
 export interface JobStartedEvent {
   jobId: string;
+  /** 需要提醒用户的事项（如目标目录不可写、已回退保存位置）。 */
+  notice: string | null;
 }
 
 export interface JobProgressEvent {
@@ -62,6 +64,8 @@ export interface JobFinishedEvent {
 export interface ActiveJobUi {
   id: string;
   startedAt: number;
+  /** 需要提醒用户的事项（如目标目录不可写、已回退保存位置）。 */
+  notice: string | null;
   percent: number;
   outTimeSecs: number;
   durationKnown: boolean;
