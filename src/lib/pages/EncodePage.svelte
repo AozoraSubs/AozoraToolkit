@@ -4,9 +4,13 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { onDestroy, onMount } from "svelte";
   import {
+    CONTAINER_OPTIONS,
+    containerFromPath,
+    containerSupportsEncoder,
     ENCODER_DEFINITIONS,
     encoderDefinition,
     suggestOutputPath,
+    swapOutputExtension,
     validateVideoConfig,
   } from "../encoders";
   import { copyName, matchesPreset, presetEncoderAvailable } from "../presets";
@@ -16,6 +20,7 @@
     encodeForm,
     loadInputFile,
     resetVideoForEncoder,
+    setOutputContainer,
   } from "../stores/encodeForm.svelte";
   import {
     clearFinishedJob,
@@ -30,7 +35,7 @@
     userPresets,
   } from "../stores/presets.svelte";
   import { refreshCapabilities, toolsState } from "../stores/tools.svelte";
-  import type { EnqueueResult } from "../types/encode";
+  import type { Container, EnqueueResult } from "../types/encode";
   import { copyText, formatCommandLine } from "../utils/command";
   import { formatBytes, formatSeconds } from "../utils/format";
 
@@ -68,8 +73,14 @@
         selectedPreset,
         encodeForm.video,
         encodeForm.subtitleMode,
+        encodeForm.container,
         encodeForm.overwrite,
       ),
+  );
+  // 输出路径扩展名与所选容器不一致（后端会拒绝，这里提前提示）
+  const outputExtensionMismatch = $derived(
+    !!encodeForm.outputPath.trim() &&
+      containerFromPath(encodeForm.outputPath) !== encodeForm.container,
   );
   const commandLine = $derived(
     previewArgs
@@ -146,11 +157,24 @@
     const selected = await save({
       title: "选择输出位置",
       defaultPath:
-        encodeForm.outputPath || (info ? suggestOutputPath(info.filePath) : ""),
-      filters: [{ name: "视频文件", extensions: ["mkv", "mp4"] }],
+        encodeForm.outputPath ||
+        (info
+          ? suggestOutputPath(info.filePath, encodeForm.container)
+          : `output.${encodeForm.container}`),
+      // 保存对话框按当前容器限定扩展名，避免选出与容器不一致的文件名
+      filters: [
+        {
+          name: `${encodeForm.container.toUpperCase()} 视频`,
+          extensions: [encodeForm.container],
+        },
+      ],
     });
     if (typeof selected === "string") {
-      encodeForm.outputPath = selected;
+      // 部分平台会忽略过滤器扩展名，这里再对齐一次
+      encodeForm.outputPath = swapOutputExtension(
+        selected,
+        encodeForm.container,
+      );
       await refreshPreview();
     }
   }
@@ -280,7 +304,10 @@
           // 预设不保存字幕文件路径（与机器相关）
           externalPath: null,
         },
-        output: { overwrite: encodeForm.overwrite },
+        output: {
+          container: encodeForm.container,
+          overwrite: encodeForm.overwrite,
+        },
       });
       notice = `已保存预设：${preset.name}（可在「预设」页管理）`;
       saveName = "";
@@ -548,9 +575,14 @@
           <span class="field-hint">字幕将被渲染进画面，成为视频的一部分</span>
         {:else if info && info.subtitleStreams.length === 0}
           <span class="field-hint">源文件无字幕轨</span>
-        {:else if encodeForm.subtitleMode === "copy" && /\.mp4$/i.test(encodeForm.outputPath)}
+        {:else if encodeForm.subtitleMode === "copy" && encodeForm.container === "mp4"}
           <span class="field-hint">
             MP4 对字幕格式支持有限（仅 mov_text），建议使用 MKV
+          </span>
+        {:else if encodeForm.subtitleMode === "copy" && encodeForm.container === "webm"}
+          <span class="field-hint warn">
+            WebM 不封装文本字幕轨，保留字幕后压制会失败；请改用 MKV
+            或把字幕烧录进画面
           </span>
         {/if}
       </label>
@@ -577,19 +609,50 @@
     {/if}
 
     <div class="form-grid">
+      <label class="field">
+        <span class="field-label">封装格式</span>
+        <select
+          value={encodeForm.container}
+          onchange={(event) => {
+            setOutputContainer(
+              (event.currentTarget as HTMLSelectElement).value as Container,
+            );
+            void refreshPreview();
+          }}
+        >
+          {#each CONTAINER_OPTIONS as option (option.id)}
+            <option value={option.id}>{option.label}</option>
+          {/each}
+        </select>
+        <span class="field-hint">
+          {CONTAINER_OPTIONS.find((o) => o.id === encodeForm.container)?.note}
+        </span>
+        {#if !containerSupportsEncoder(encodeForm.container, encodeForm.video.encoderId)}
+          <span class="field-hint warn">
+            {currentDefinition?.label ?? encodeForm.video.encoderId} 编码的码流无法封装进该格式，
+            请改用 MKV / MP4，或换用 AV1 编码器
+          </span>
+        {/if}
+      </label>
+
       <label class="field wide">
         <span class="field-label">输出路径</span>
         <div class="row">
           <input
             type="text"
             bind:value={encodeForm.outputPath}
-            placeholder="选择或输入输出文件路径（.mkv / .mp4）"
+            placeholder="选择或输入输出文件路径（.{encodeForm.container}）"
             onchange={() => void refreshPreview()}
           />
           <button type="button" onclick={pickOutputPath}>浏览…</button>
         </div>
         {#if !info}
           <span class="field-hint">导入输入文件后会自动建议输出路径</span>
+        {:else if outputExtensionMismatch}
+          <span class="field-hint warn">
+            输出路径扩展名与所选封装格式（.{encodeForm.container}）不一致，
+            开始压制前会被拒绝
+          </span>
         {/if}
       </label>
 
@@ -1005,6 +1068,11 @@
   .field-hint {
     font-size: 11px;
     color: var(--color-text-secondary);
+  }
+
+  /* 兼容性提示：容器 / 扩展名与当前设置冲突时加重提醒 */
+  .field-hint.warn {
+    color: var(--color-danger);
   }
 
   .field input[type="text"],

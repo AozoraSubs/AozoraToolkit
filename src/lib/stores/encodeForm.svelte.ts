@@ -1,6 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import { defaultVideoConfig, suggestOutputPath } from "../encoders";
-import type { EncodeConfig, SubtitleMode, VideoConfig } from "../types/encode";
+import {
+  containerFromPath,
+  defaultVideoConfig,
+  suggestOutputPath,
+  swapOutputExtension,
+} from "../encoders";
+import type {
+  Container,
+  EncodeConfig,
+  SubtitleMode,
+  VideoConfig,
+} from "../types/encode";
 import type { JobRecord } from "../types/jobs";
 import type { MediaProbeResult } from "../types/media";
 import type { Preset } from "../types/preset";
@@ -19,6 +29,8 @@ export const encodeForm = $state<{
   subtitleMode: SubtitleMode;
   subtitlePath: string;
   outputPath: string;
+  /** 输出封装格式；来自用户选择或输入文件扩展名，默认 MKV。 */
+  container: Container;
   overwrite: boolean;
   /** 当前表单来源的预设 ID；参数被手动修改后仍然保留，由界面标注"已修改"。 */
   appliedPresetId: string | null;
@@ -30,6 +42,7 @@ export const encodeForm = $state<{
   subtitleMode: "drop",
   subtitlePath: "",
   outputPath: "",
+  container: "mkv",
   overwrite: false,
   appliedPresetId: null,
 });
@@ -49,9 +62,24 @@ export function buildEncodeConfig(): EncodeConfig {
     },
     output: {
       path: encodeForm.outputPath.trim(),
+      container: encodeForm.container,
       overwrite: encodeForm.overwrite,
     },
   };
+}
+
+/**
+ * 切换封装格式：同步替换输出路径的扩展名，保证两者始终一致
+ * （后端会拒绝扩展名与容器不一致的输出路径）。
+ */
+export function setOutputContainer(container: Container): void {
+  encodeForm.container = container;
+  if (encodeForm.outputPath.trim()) {
+    encodeForm.outputPath = swapOutputExtension(
+      encodeForm.outputPath,
+      container,
+    );
+  }
 }
 
 /**
@@ -64,7 +92,13 @@ export async function loadInputFile(path: string): Promise<string | null> {
   try {
     const info = await invoke<MediaProbeResult>("probe_media_file", { path });
     encodeForm.info = info;
-    encodeForm.outputPath = suggestOutputPath(info.filePath);
+    // 输入文件本身就是 MKV / MP4 / WebM 时沿用其容器，其余输入保持当前选择
+    encodeForm.container =
+      containerFromPath(info.filePath) ?? encodeForm.container;
+    encodeForm.outputPath = suggestOutputPath(
+      info.filePath,
+      encodeForm.container,
+    );
     return null;
   } catch (err) {
     encodeForm.info = null;
@@ -82,7 +116,8 @@ export function resetVideoForEncoder(encoderId: string) {
 }
 
 /**
- * 应用预设：覆盖视频参数、字幕模式与覆盖策略；输出路径保持用户已选值。
+ * 应用预设：覆盖视频参数、字幕模式、封装格式与覆盖策略；输出路径保持
+ * 用户已选值，但扩展名跟随预设的容器（保证路径与容器一致）。
  *
  * 预设不保存外部字幕文件路径（与机器相关）：烧录模式的预设保留用户当前
  * 已选择的字幕文件，避免"应用预设后字幕文件被清空"。
@@ -93,10 +128,14 @@ export function applyPreset(preset: Preset): void {
   if (preset.subtitles.mode !== "burn") {
     encodeForm.subtitlePath = "";
   }
+  setOutputContainer(preset.output.container);
   encodeForm.overwrite = preset.output.overwrite;
   encodeForm.appliedPresetId = preset.id;
   if (!encodeForm.outputPath.trim() && encodeForm.info) {
-    encodeForm.outputPath = suggestOutputPath(encodeForm.info.filePath);
+    encodeForm.outputPath = suggestOutputPath(
+      encodeForm.info.filePath,
+      encodeForm.container,
+    );
   }
 }
 
@@ -113,6 +152,7 @@ export async function loadFromJobRecord(
   encodeForm.subtitleMode = config.subtitles.mode;
   encodeForm.subtitlePath = config.subtitles.externalPath ?? "";
   encodeForm.outputPath = config.output.path;
+  encodeForm.container = config.output.container;
   encodeForm.overwrite = config.output.overwrite;
   // 参数来自任务历史，不是某个预设
   encodeForm.appliedPresetId = null;

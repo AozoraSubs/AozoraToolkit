@@ -96,9 +96,9 @@ describe("presetFileName", () => {
 describe("matchesPreset", () => {
   it("detects an unmodified preset application", () => {
     const preset = presetFixture();
-    expect(matchesPreset(preset, { ...preset.video }, "drop", false)).toBe(
-      true,
-    );
+    expect(
+      matchesPreset(preset, { ...preset.video }, "drop", "mkv", false),
+    ).toBe(true);
   });
 
   it("reports modifications of any preset field", () => {
@@ -108,6 +108,7 @@ describe("matchesPreset", () => {
         preset,
         { ...preset.video, qualityValue: 20 },
         "drop",
+        "mkv",
         false,
       ),
     ).toBe(false);
@@ -116,15 +117,20 @@ describe("matchesPreset", () => {
         preset,
         { ...preset.video, encoderId: "libx264" },
         "drop",
+        "mkv",
         false,
       ),
     ).toBe(false);
-    expect(matchesPreset(preset, { ...preset.video }, "copy", false)).toBe(
-      false,
-    );
-    expect(matchesPreset(preset, { ...preset.video }, "drop", true)).toBe(
-      false,
-    );
+    expect(
+      matchesPreset(preset, { ...preset.video }, "copy", "mkv", false),
+    ).toBe(false);
+    // 封装格式也属于预设保存的内容
+    expect(
+      matchesPreset(preset, { ...preset.video }, "drop", "mp4", false),
+    ).toBe(false);
+    expect(
+      matchesPreset(preset, { ...preset.video }, "drop", "mkv", true),
+    ).toBe(false);
   });
 
   it("ignores fields a preset does not store", () => {
@@ -135,6 +141,7 @@ describe("matchesPreset", () => {
         preset,
         { ...preset.video, pixelFormat: null },
         "drop",
+        "mkv",
         false,
       ),
     ).toBe(false);

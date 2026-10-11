@@ -3,6 +3,8 @@ import type { KnownEncoders } from "./tools";
 export type QualityMode = "crf" | "cq";
 export type AudioMode = "copy";
 export type SubtitleMode = "copy" | "drop" | "burn";
+/** 输出封装格式（与 Rust `Container` 对应）。 */
+export type Container = "mkv" | "mp4" | "webm";
 
 export interface VideoConfig {
   encoderId: string;
@@ -25,6 +27,7 @@ export interface SubtitleConfig {
 
 export interface OutputConfig {
   path: string;
+  container: Container;
   overwrite: boolean;
 }
 

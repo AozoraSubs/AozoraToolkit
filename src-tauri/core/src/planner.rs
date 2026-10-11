@@ -3,12 +3,9 @@
 //! 所有路径以 `OsString` 逐项传入参数数组，绝不拼接 Shell 命令
 //! （PLAN §4 安全执行原则）。
 
-use crate::encode::{self, EncodeConfig, EncoderFamily, QualityMode};
+use crate::encode::{self, Container, EncodeConfig, EncoderFamily, QualityMode};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-
-/// 输出容器扩展名（M2：MKV 为主，支持 MP4）。
-pub const SUPPORTED_OUTPUT_EXTENSIONS: [&str; 2] = ["mkv", "mp4"];
 
 /// 根据结构化配置生成 FFmpeg 参数数组（不含程序名）。
 ///
@@ -124,21 +121,37 @@ pub fn burn_subtitle_filter(path: &Path) -> String {
 
 // ---------- 路径安全 ----------
 
-/// 检查输入/输出路径：输入存在性、输出扩展名、父目录、输入输出冲突与覆盖行为。
-pub fn check_paths(input: &Path, output: &Path, overwrite: bool) -> Result<(), String> {
+/// 检查输入/输出路径：输入存在性、输出扩展名与所选容器一致、父目录、
+/// 输入输出冲突与覆盖行为。
+pub fn check_paths(
+    input: &Path,
+    output: &Path,
+    container: Container,
+    overwrite: bool,
+) -> Result<(), String> {
     if !input.is_file() {
         return Err(format!("输入文件不存在或不是文件：{}", input.display()));
     }
 
+    let expected = container.extension();
     let ext = output
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
     match ext {
-        Some(e) if SUPPORTED_OUTPUT_EXTENSIONS.contains(&e.as_str()) => {}
+        Some(e) if e == expected => {}
+        // 扩展名属于其他受支持容器：提示用户是容器选择与文件名不一致，
+        // 而不是把 .webm 误报成"不支持的格式"。
+        Some(e) if Container::extensions().contains(&e.as_str()) => {
+            return Err(format!(
+                "输出文件扩展名 .{e} 与所选封装格式 {}（.{expected}）不一致：{}",
+                container_label(container),
+                output.display()
+            ));
+        }
         _ => {
             return Err(format!(
-                "输出文件扩展名必须是 .mkv 或 .mp4：{}",
+                "输出文件扩展名必须是 .mkv、.mp4 或 .webm：{}",
                 output.display()
             ));
         }
@@ -170,6 +183,15 @@ pub fn check_paths(input: &Path, output: &Path, overwrite: bool) -> Result<(), S
         ));
     }
     Ok(())
+}
+
+/// 容器的用户可见名称（用于错误信息与提示）。
+pub fn container_label(container: Container) -> &'static str {
+    match container {
+        Container::Mkv => "MKV",
+        Container::Mp4 => "MP4",
+        Container::Webm => "WebM",
+    }
 }
 
 /// 判断文件名是否属于本应用的临时输出（`*.aozora-part-*`），
@@ -376,6 +398,7 @@ mod tests {
             subtitles: SubtitleConfig::default(),
             output: OutputConfig {
                 path: PathBuf::from("out.mkv"),
+                container: Container::Mkv,
                 overwrite: false,
             },
         }
@@ -543,8 +566,8 @@ mod tests {
         let input = dir.join("input.mkv");
         fs::write(&input, b"placeholder").unwrap();
         let output = dir.join("output.mkv");
-        assert!(check_paths(&input, &output, false).is_ok());
-        assert!(check_paths(&input, &output, true).is_ok());
+        assert!(check_paths(&input, &output, Container::Mkv, false).is_ok());
+        assert!(check_paths(&input, &output, Container::Mkv, true).is_ok());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -600,7 +623,13 @@ mod tests {
     #[test]
     fn check_paths_rejects_missing_input() {
         let dir = temp_dir("missing-input");
-        let err = check_paths(&dir.join("nope.mkv"), &dir.join("out.mkv"), false).unwrap_err();
+        let err = check_paths(
+            &dir.join("nope.mkv"),
+            &dir.join("out.mkv"),
+            Container::Mkv,
+            false,
+        )
+        .unwrap_err();
         assert!(err.contains("输入文件不存在"), "error: {err}");
         fs::remove_dir_all(&dir).ok();
     }
@@ -610,8 +639,42 @@ mod tests {
         let dir = temp_dir("bad-ext");
         let input = dir.join("input.mkv");
         fs::write(&input, b"x").unwrap();
-        let err = check_paths(&input, &dir.join("out.avi"), false).unwrap_err();
-        assert!(err.contains(".mkv 或 .mp4"), "error: {err}");
+        let err = check_paths(&input, &dir.join("out.avi"), Container::Mkv, false).unwrap_err();
+        assert!(err.contains(".mkv、.mp4 或 .webm"), "error: {err}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn check_paths_accepts_each_supported_container() {
+        let dir = temp_dir("containers");
+        let input = dir.join("input.mkv");
+        fs::write(&input, b"x").unwrap();
+        for (container, ext) in [
+            (Container::Mkv, "mkv"),
+            (Container::Mp4, "mp4"),
+            (Container::Webm, "webm"),
+        ] {
+            let output = dir.join(format!("out.{ext}"));
+            assert!(
+                check_paths(&input, &output, container, false).is_ok(),
+                "container {container:?} 应接受 .{ext}"
+            );
+        }
+        // 扩展名大小写不敏感
+        assert!(check_paths(&input, &dir.join("OUT.MP4"), Container::Mp4, false).is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn check_paths_rejects_extension_container_mismatch() {
+        let dir = temp_dir("mismatch");
+        let input = dir.join("input.mkv");
+        fs::write(&input, b"x").unwrap();
+        // 选了 MP4 却写 .mkv：提示两者不一致，而不是"不支持的扩展名"
+        let err = check_paths(&input, &dir.join("out.mkv"), Container::Mp4, false).unwrap_err();
+        assert!(err.contains("与所选封装格式 MP4"), "error: {err}");
+        let err = check_paths(&input, &dir.join("out.webm"), Container::Mkv, false).unwrap_err();
+        assert!(err.contains("与所选封装格式 MKV"), "error: {err}");
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -620,7 +683,13 @@ mod tests {
         let dir = temp_dir("missing-parent");
         let input = dir.join("input.mkv");
         fs::write(&input, b"x").unwrap();
-        let err = check_paths(&input, &dir.join("no-such-dir").join("out.mkv"), false).unwrap_err();
+        let err = check_paths(
+            &input,
+            &dir.join("no-such-dir").join("out.mkv"),
+            Container::Mkv,
+            false,
+        )
+        .unwrap_err();
         assert!(err.contains("输出目录不存在"), "error: {err}");
         fs::remove_dir_all(&dir).ok();
     }
@@ -632,9 +701,9 @@ mod tests {
         let output = dir.join("output.mkv");
         fs::write(&input, b"x").unwrap();
         fs::write(&output, b"y").unwrap();
-        let err = check_paths(&input, &output, false).unwrap_err();
+        let err = check_paths(&input, &output, Container::Mkv, false).unwrap_err();
         assert!(err.contains("已存在"), "error: {err}");
-        assert!(check_paths(&input, &output, true).is_ok());
+        assert!(check_paths(&input, &output, Container::Mkv, true).is_ok());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -643,7 +712,7 @@ mod tests {
         let dir = temp_dir("conflict");
         let input = dir.join("same.mkv");
         fs::write(&input, b"x").unwrap();
-        let err = check_paths(&input, &input, true).unwrap_err();
+        let err = check_paths(&input, &input, Container::Mkv, true).unwrap_err();
         assert!(err.contains("禁止覆盖输入"), "error: {err}");
 
         // 大小写不同、路径写法不同的等价路径也应识别为同一文件
@@ -651,7 +720,7 @@ mod tests {
         output.pop();
         output.push("SAME.mkv");
         if cfg!(windows) {
-            let err = check_paths(&input, &output, true).unwrap_err();
+            let err = check_paths(&input, &output, Container::Mkv, true).unwrap_err();
             assert!(err.contains("禁止覆盖输入"), "error: {err}");
         }
         fs::remove_dir_all(&dir).ok();

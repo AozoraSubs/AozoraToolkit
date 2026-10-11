@@ -1,5 +1,5 @@
-import { encoderDefinition } from "./encoders";
-import type { SubtitleMode, VideoConfig } from "./types/encode";
+import { CONTAINER_OPTIONS, encoderDefinition } from "./encoders";
+import type { Container, SubtitleMode, VideoConfig } from "./types/encode";
 import type { Preset, PresetInput } from "./types/preset";
 import type { CapabilityReport } from "./types/tools";
 
@@ -15,8 +15,13 @@ export function presetSummary(preset: Preset): string {
       : preset.subtitles.mode === "burn"
         ? "烧录外部字幕（使用时选择文件）"
         : "丢弃字幕";
+  const container = CONTAINER_OPTIONS.find(
+    (option) => option.id === preset.output.container,
+  );
   const overwrite = preset.output.overwrite ? "覆盖已有输出" : "不覆盖输出";
-  return `${label} · ${quality} · ${preset.video.preset} · ${pixel} · ${subtitle} · ${overwrite}`;
+  return `${label} · ${quality} · ${preset.video.preset} · ${pixel} · ${subtitle} · ${
+    container?.label ?? preset.output.container
+  } · ${overwrite}`;
 }
 
 /** 预设要求的编码器在当前 FFmpeg 中是否可用（能力尚未检测时视为可用）。 */
@@ -42,7 +47,10 @@ export function presetToInput(preset: Preset, name: string): PresetInput {
     video: { ...preset.video },
     audio: { ...preset.audio },
     subtitles: { mode: preset.subtitles.mode, externalPath: null },
-    output: { overwrite: preset.output.overwrite },
+    output: {
+      container: preset.output.container,
+      overwrite: preset.output.overwrite,
+    },
   };
 }
 
@@ -55,6 +63,7 @@ export function matchesPreset(
   preset: Preset,
   video: VideoConfig,
   subtitleMode: SubtitleMode,
+  container: Container,
   overwrite: boolean,
 ): boolean {
   return (
@@ -64,6 +73,7 @@ export function matchesPreset(
     video.preset === preset.video.preset &&
     video.pixelFormat === preset.video.pixelFormat &&
     subtitleMode === preset.subtitles.mode &&
+    container === preset.output.container &&
     overwrite === preset.output.overwrite
   );
 }

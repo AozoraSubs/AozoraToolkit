@@ -621,6 +621,66 @@ mod tests {
         std::fs::remove_dir_all(app_tmp).ok();
     }
 
+    /// 实机验证：输出封装格式由配置里的 container 决定（MP4 输出可读、扩展名一致）。
+    #[tokio::test]
+    #[ignore = "requires ffmpeg and ffprobe on PATH"]
+    async fn encode_honours_configured_container() {
+        use crate::encode::Container;
+        use crate::probe::probe_media;
+
+        let path_entries: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|value| std::env::split_paths(&value).collect())
+            .unwrap_or_default();
+        let ffmpeg = find_in_path("ffmpeg", &path_entries).expect("ffmpeg 未在 PATH 中检测到");
+        let ffprobe = find_in_path("ffprobe", &path_entries).expect("ffprobe 未在 PATH 中检测到");
+
+        let dir = temp_dir("container");
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.mkv");
+        generate_input(&ffmpeg, &input, 1);
+
+        for (container, ext) in [(Container::Mkv, "mkv"), (Container::Mp4, "mp4")] {
+            let output = dir.join(format!("out-{ext}.{ext}"));
+            let mut config = config_for("libx264", "veryfast", 23);
+            config.output.container = container;
+            config.output.path = output.clone();
+            let temp = planner::temp_output_path(&dir, &output, "e-test-container");
+            // 临时输出沿用最终扩展名，FFmpeg 依扩展名选择封装器
+            assert_eq!(temp.extension().unwrap(), ext);
+            let args = planner::build_args(&config, &input, &temp).unwrap();
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (event_tx, _event_rx) = collect_events();
+
+            let result = run_encode(
+                EncodeRequest {
+                    ffmpeg_path: ffmpeg.clone(),
+                    args,
+                    input_path: input.clone(),
+                    temp_path: temp.clone(),
+                    final_path: output.clone(),
+                    overwrite: false,
+                    duration_secs: None,
+                    cancel: cancel_rx,
+                },
+                event_tx,
+            )
+            .await;
+
+            assert_eq!(
+                result.status,
+                EncodeStatus::Completed,
+                "{ext} 失败：{:?}",
+                result.error
+            );
+            let info = probe_media(&ffprobe, &output).expect("输出探测失败");
+            // MP4 与 MKV 都应保留视频与音频流
+            assert_eq!(info.video_streams.len(), 1, "{ext} 视频流数量不符");
+            assert_eq!(info.audio_streams.len(), 1, "{ext} 音频流数量不符");
+            assert!(!temp.exists(), "{ext} 临时文件未清理");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// 实机验证：输入不存在 → 失败，临时文件被清理，不产生成品。
     #[tokio::test]
     #[ignore = "requires ffmpeg on PATH"]

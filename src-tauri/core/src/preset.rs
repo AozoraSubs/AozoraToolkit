@@ -6,8 +6,8 @@
 //! 用户预设以 `<id>.json` 存放在配置目录的 `presets/` 下。
 
 use crate::encode::{
-    self, AudioConfig, EncodeConfig, OutputConfig, SubtitleConfig, SubtitleMode, VideoConfig,
-    ENCODE_CONFIG_SCHEMA_VERSION,
+    self, AudioConfig, Container, EncodeConfig, OutputConfig, SubtitleConfig, SubtitleMode,
+    VideoConfig, ENCODE_CONFIG_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -29,10 +29,14 @@ static PRESET_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ---------- 数据模型 ----------
 
-/// 预设中的输出选项：只保留与机器无关的覆盖策略，不含输出路径。
+/// 预设中的输出选项：只保留与机器无关的输出意图（封装格式与覆盖策略），
+/// 不含输出路径。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PresetOutput {
+    /// 封装格式；旧预设无此字段时默认 MKV。
+    #[serde(default)]
+    pub container: Container,
     /// 应用预设时是否允许覆盖已存在的输出文件。
     #[serde(default)]
     pub overwrite: bool,
@@ -241,6 +245,7 @@ impl Preset {
             subtitles: self.subtitles.clone(),
             output: OutputConfig {
                 path: PathBuf::new(),
+                container: self.output.container,
                 overwrite: self.output.overwrite,
             },
         }
@@ -529,7 +534,10 @@ mod tests {
             },
             audio: AudioConfig::default(),
             subtitles: SubtitleConfig::default(),
-            output: PresetOutput { overwrite: true },
+            output: PresetOutput {
+                container: crate::encode::Container::Mkv,
+                overwrite: true,
+            },
         }
     }
 
@@ -620,6 +628,39 @@ mod tests {
         // 该预设可以直接应用到编码配置（烧录文件在压制页选择）
         let config = preset.to_encode_config();
         assert!(config.output.path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn container_survives_preset_round_trip_and_defaults_to_mkv() {
+        let (store, _dir) = store("container");
+        // 显式选择 WebM
+        let mut draft = input("WebM 预设");
+        draft.output.container = crate::encode::Container::Webm;
+        let preset = store.create(draft, 1).unwrap();
+        assert_eq!(preset.output.container, crate::encode::Container::Webm);
+        assert_eq!(
+            preset.to_encode_config().output.container,
+            crate::encode::Container::Webm
+        );
+
+        // 未指定容器（旧预设文件）时默认 MKV
+        let legacy = input("旧预设");
+        assert_eq!(legacy.output.container, crate::encode::Container::Mkv);
+        let preset = store.create(legacy, 2).unwrap();
+        let json = serde_json::to_string(&preset).unwrap();
+        assert!(json.contains("\"container\":\"mkv\""), "json: {json}");
+    }
+
+    #[test]
+    fn preset_json_without_container_field_is_accepted() {
+        let (store, _dir) = store("legacy-container");
+        let text = r#"{
+            "schemaVersion":1,"id":"p-legacy","name":"容器前旧预设",
+            "video":{"encoderId":"libx264","qualityMode":"crf","qualityValue":18,"preset":"slow","pixelFormat":null},
+            "audio":{"mode":"copy"},
+            "output":{"overwrite":false}}"#;
+        let preset = store.import_text(text, 1).unwrap();
+        assert_eq!(preset.output.container, crate::encode::Container::Mkv);
     }
 
     #[test]

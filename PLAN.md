@@ -347,6 +347,28 @@
 - **PLAN 更新：** 本记录新增；无清单勾选变化。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（M2 扩展）：封装格式选择器（MKV / MP4 / WebM）
+
+- **本次完成：** 按用户要求把输出封装格式从"跟随输出路径扩展名"改为**显式选择**，新增 MKV / MP4 / WebM 三个选项（此前只允许 .mkv / .mp4，且 MP4 输入默认仍出 MP4）。
+  1. 配置模型：`aozora_core::encode::Container`（`mkv` / `mp4` / `webm`，`Default = Mkv`）加入 `OutputConfig.container`；旧配置 JSON 无此字段时按 MKV 处理（`#[serde(default)]`，不破坏既有预设与任务历史）。预设置信 `PresetOutput.container`（同样带默认值，`to_encode_config` 透传）。
+  2. 路径校验：`planner::check_paths(input, output, container, overwrite)` 现在要求输出扩展名与所选容器**一致**——扩展名属于其他受支持容器时给出"扩展名与所选封装格式不一致"的明确提示，其他扩展名仍报"必须是 .mkv、.mp4 或 .webm"。容器决定 FFmpeg 的封装器（仍按扩展名选择，应用不传 `-f`）。
+  3. 前端：压制页新增「封装格式」下拉，切换时自动把输出路径扩展名换成对应容器（`swapOutputExtension`，保证路径与容器始终一致）；保存对话框按当前容器限定扩展名；输出路径扩展名被手工改乱时在界面提前红色提示。导入输入文件时，若输入本身是 MKV / MP4 / WebM 则沿用其容器，其余输入保持当前选择。
+  4. 兼容性提示（不代为改写编码器）：WebM + 非 AV1 编码器（本应用默认 libx264）提示"码流无法封装进该格式"；MP4 + 保留字幕轨提示仅支持 mov_text；WebM + 保留字幕轨提示 WebM 不封装文本字幕轨。
+  5. 预设：`matchesPreset` 与预设摘要纳入封装格式，保存预设时会带上当前容器。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（93 单元 + 1 冒烟通过；新增 `check_paths_accepts_each_supported_container`、`check_paths_rejects_extension_container_mismatch`、`container_variants_round_trip_and_expose_extensions`、`unknown_container_is_rejected`、`container_survives_preset_round_trip_and_defaults_to_mkv`、`preset_json_without_container_field_is_accepted` 等用例）。
+  - 实机集成：`cargo test --workspace -- --ignored` **12/12 通过**（含新增 `encode_honours_configured_container`：MKV 与 MP4 两种容器真实压制均成功、成品可被 FFprobe 读取、临时文件清理正常）。
+  - **端到端脚本核对（一次性脚本，验证后已删除未入库）**：用真实 FFmpeg 走 `validate_config → check_paths → build_args → run_encode` 的 MP4 路径，成品 57,730 字节、视频流 1、音频流 1、时长 2.0s；容器与扩展名不一致时得到可读错误。测试素材使用 `target/self-test/input-short.mkv`。
+  - 前端：`pnpm run check`（0 错误 0 警告）、`pnpm run lint`、`pnpm run format:check`、`pnpm test`（47 通过，新增 `suggestOutputPath` 容器参数、`swapOutputExtension`、`containerFromPath`、`containerSupportsEncoder` 与 `matchesPreset` 容器比较用例）、`pnpm build`（通过）。
+  - 实机界面：`pnpm tauri dev` 后 `PrintWindow` 抓图确认「封装格式」下拉显示为「MKV（Matroska）」并带说明文字，输出路径占位符同步显示 `.mkv`。
+- **范围说明（偏离记录）：** §4.2 原写"输出容器第一版以 MKV 为主，可按需求添加 MP4"；本次按用户明确要求显式提供 MKV / MP4 / WebM 三个选项，属于该条目的扩展。
+- **限制（如实记录）：**
+  - **WebM 目前实际上不可用**：应用可选的编码器只有 libx264 / libx265 / h264_nvenc / hevc_nvenc / av1_nvenc，WebM 只接受 VP8 / VP9 / AV1。选 WebM 通常会在 FFmpeg 阶段失败（界面已提示）；若显卡支持 AV1（`av1_nvenc` 可用）才可能成功。要真正可用需先支持 libvpx-vp9 / libaom-av1（计划外，未实现）。
+  - WebM 与 MP4 的字幕/编码器兼容性只在界面提示，**不做强制阻止**；压制失败时由 FFmpeg 的错误日志说明原因。
+  - 未在真实消费设备上验证 MP4 产物的兼容性。
+- **PLAN 更新：** 无清单勾选变化（M2 已完成，本项为其扩展）；本记录新增。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱

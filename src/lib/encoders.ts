@@ -1,4 +1,5 @@
 import type {
+  Container,
   EncoderCapabilityKey,
   QualityMode,
   VideoConfig,
@@ -174,16 +175,97 @@ export function validateVideoConfig(video: VideoConfig): string | null {
   return null;
 }
 
-/** 由输入路径建议输出路径：同目录、`<文件名>.encoded.<mkv|mp4>`。 */
-export function suggestOutputPath(inputPath: string): string {
+/**
+ * 由输入路径建议输出路径：同目录、`<文件名>.encoded.<容器扩展名>`。
+ *
+ * 扩展名由显式选择的封装格式决定（不再跟随输入文件）；输入本身是
+ * MKV / MP4 / WebM 时用其扩展名作为初始容器，其余输入按容器默认值。
+ */
+export function suggestOutputPath(
+  inputPath: string,
+  container: Container,
+): string {
   const normalized = inputPath.replaceAll("\\", "/");
   const slash = normalized.lastIndexOf("/");
   const dir = slash >= 0 ? normalized.slice(0, slash) : "";
   const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
   const dot = file.lastIndexOf(".");
   const stem = dot > 0 ? file.slice(0, dot) : file;
-  const ext = dot > 0 ? file.slice(dot + 1).toLowerCase() : "";
-  const container = ext === "mp4" ? "mp4" : "mkv";
   const output = `${stem}.encoded.${container}`;
   return dir ? `${dir}/${output}` : output;
+}
+
+/** 输入文件扩展名对应的容器；不是受支持的容器时返回 null。 */
+export function containerFromPath(path: string): Container | null {
+  const file = path.replaceAll("\\", "/").split("/").pop() ?? "";
+  const dot = file.lastIndexOf(".");
+  if (dot <= 0) {
+    return null;
+  }
+  const ext = file.slice(dot + 1).toLowerCase();
+  return isContainer(ext) ? ext : null;
+}
+
+/** 把路径的扩展名替换为所选容器的扩展名（无扩展名时追加）。 */
+export function swapOutputExtension(
+  path: string,
+  container: Container,
+): string {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  const normalized = trimmed.replaceAll("\\", "/");
+  const slash = normalized.lastIndexOf("/");
+  const dir = slash >= 0 ? normalized.slice(0, slash) : "";
+  const file = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const dot = file.lastIndexOf(".");
+  const stem = dot > 0 ? file.slice(0, dot) : file;
+  const output = `${stem}.${container}`;
+  return dir ? `${dir}/${output}` : output;
+}
+
+/** 类型守卫：字符串是否为受支持的容器。 */
+export function isContainer(value: string): value is Container {
+  return (CONTAINER_OPTIONS as ReadonlyArray<{ id: string }>).some(
+    (option) => option.id === value,
+  );
+}
+
+/**
+ * 封装格式选项：`note` 是容器的固定说明，界面在下方展示。
+ * 这些限制来自 FFmpeg 的封装器本身，应用不代为改写编码器或字幕处理方式。
+ */
+export const CONTAINER_OPTIONS: ReadonlyArray<{
+  id: Container;
+  label: string;
+  note: string;
+}> = [
+  {
+    id: "mkv",
+    label: "MKV（Matroska）",
+    note: "兼容性最好，支持全部常见字幕格式与多轨",
+  },
+  {
+    id: "mp4",
+    label: "MP4",
+    note: "消费设备兼容性好；字幕仅支持 mov_text",
+  },
+  {
+    id: "webm",
+    label: "WebM",
+    note: "仅支持 VP8 / VP9 / AV1 视频与 Opus / Vorbis 音频",
+  },
+];
+
+/** 容器是否承载得了当前视频编码器（判断依据：容器的标准编码集合）。 */
+export function containerSupportsEncoder(
+  container: Container,
+  encoderId: string,
+): boolean {
+  if (container !== "webm") {
+    return true;
+  }
+  // WebM 只接受 VP8 / VP9 / AV1；本应用当前编码器集合里只有 AV1 可用。
+  return encoderId.includes("av1") || encoderId.startsWith("libvpx");
 }

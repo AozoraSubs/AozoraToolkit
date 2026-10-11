@@ -128,10 +128,42 @@ pub enum SubtitleMode {
 /// 烧录模式支持的外部字幕扩展名。
 pub const BURN_SUBTITLE_EXTENSIONS: [&str; 2] = ["srt", "ass"];
 
+/// 输出封装格式（容器）。用户可在压制页显式选择，不再依赖输出路径扩展名。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Container {
+    /// Matroska：兼容性最好，支持全部常见字幕格式（默认）。
+    #[default]
+    Mkv,
+    /// MP4：兼容消费设备，字幕仅支持 mov_text。
+    Mp4,
+    /// WebM：仅支持 VP8 / VP9 / AV1 视频与 Vorbis / Opus 音频。
+    Webm,
+}
+
+impl Container {
+    /// 该容器在输出路径中使用的扩展名。
+    pub fn extension(self) -> &'static str {
+        match self {
+            Container::Mkv => "mkv",
+            Container::Mp4 => "mp4",
+            Container::Webm => "webm",
+        }
+    }
+
+    /// 全部容器扩展名（路径校验用）。
+    pub fn extensions() -> [&'static str; 3] {
+        ["mkv", "mp4", "webm"]
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OutputConfig {
     pub path: PathBuf,
+    /// 封装格式；旧配置无此字段时默认 MKV。
+    #[serde(default)]
+    pub container: Container,
     /// 输出文件已存在时是否覆盖。
     pub overwrite: bool,
 }
@@ -140,6 +172,7 @@ impl Default for OutputConfig {
     fn default() -> Self {
         Self {
             path: PathBuf::new(),
+            container: Container::default(),
             overwrite: false,
         }
     }
@@ -435,6 +468,7 @@ mod tests {
             subtitles: SubtitleConfig::default(),
             output: OutputConfig {
                 path: PathBuf::from(r"D:\out.mkv"),
+                container: Container::Mkv,
                 overwrite: true,
             },
         };
@@ -445,6 +479,7 @@ mod tests {
             json.contains("\"pixelFormat\":\"yuv420p10le\""),
             "json: {json}"
         );
+        assert!(json.contains("\"container\":\"mkv\""), "json: {json}");
         assert!(
             json.contains(r#""subtitles":{"mode":"drop","externalPath":null}"#),
             "json: {json}"
@@ -469,6 +504,29 @@ mod tests {
         }"#;
         let config: EncodeConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.subtitles.mode, SubtitleMode::Drop);
+        // 旧配置（加容器选择之前保存的 JSON）没有 container 字段：默认 MKV
+        assert_eq!(config.output.container, Container::Mkv);
+    }
+
+    #[test]
+    fn container_variants_round_trip_and_expose_extensions() {
+        for (container, ext, json) in [
+            (Container::Mkv, "mkv", "\"mkv\""),
+            (Container::Mp4, "mp4", "\"mp4\""),
+            (Container::Webm, "webm", "\"webm\""),
+        ] {
+            assert_eq!(container.extension(), ext);
+            assert_eq!(serde_json::to_string(&container).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Container>(json).unwrap(), container);
+        }
+        assert_eq!(Container::default(), Container::Mkv);
+        assert_eq!(Container::extensions(), ["mkv", "mp4", "webm"]);
+    }
+
+    #[test]
+    fn unknown_container_is_rejected() {
+        let json = r#""avi""#;
+        assert!(serde_json::from_str::<Container>(json).is_err());
     }
 
     #[test]

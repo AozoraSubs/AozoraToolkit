@@ -89,7 +89,8 @@ fn next_job_id() -> String {
 pub fn preview_job_args(config: EncodeConfig, input_path: String) -> Result<Vec<String>, String> {
     encode::validate_config(&config)?;
     let output = if config.output.path.as_os_str().is_empty() {
-        PathBuf::from("输出.mkv")
+        // 输出路径留空时用所选容器的占位文件名，预览里的封装器与最终一致
+        PathBuf::from(format!("输出.{}", config.output.container.extension()))
     } else {
         config.output.path.clone()
     };
@@ -112,7 +113,12 @@ fn prepare_job(
     encode::validate_config(&config)?;
     let input = PathBuf::from(&input_path);
     let output = config.output.path.clone();
-    planner::check_paths(&input, &output, config.output.overwrite)?;
+    planner::check_paths(
+        &input,
+        &output,
+        config.output.container,
+        config.output.overwrite,
+    )?;
 
     // 2. 解析当前生效的 FFmpeg
     let settings = settings::load(app)?;

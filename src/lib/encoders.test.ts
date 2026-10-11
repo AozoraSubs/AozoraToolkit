@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   ENCODER_DEFINITIONS,
+  containerFromPath,
+  containerSupportsEncoder,
   defaultVideoConfig,
   encoderDefinition,
   suggestOutputPath,
+  swapOutputExtension,
   validateVideoConfig,
 } from "./encoders";
 
@@ -77,22 +80,66 @@ describe("validateVideoConfig", () => {
 });
 
 describe("suggestOutputPath", () => {
-  it("appends .encoded.mkv in the same directory", () => {
-    expect(suggestOutputPath("C:\\视频\\样片.mkv")).toBe(
+  it("uses the selected container extension in the same directory", () => {
+    expect(suggestOutputPath("C:\\视频\\样片.mkv", "mkv")).toBe(
       "C:/视频/样片.encoded.mkv",
     );
-    expect(suggestOutputPath("/media/videos/sample.mp4")).toBe(
+    expect(suggestOutputPath("/media/videos/sample.mp4", "mkv")).toBe(
+      "/media/videos/sample.encoded.mkv",
+    );
+    expect(suggestOutputPath("/media/videos/sample.mkv", "mp4")).toBe(
       "/media/videos/sample.encoded.mp4",
+    );
+    expect(suggestOutputPath("D:\\影片\\样片.mkv", "webm")).toBe(
+      "D:/影片/样片.encoded.webm",
     );
   });
 
   it("handles paths with spaces and dots", () => {
-    expect(suggestOutputPath("D:\\目录 (1)\\my file.v2.mkv")).toBe(
+    expect(suggestOutputPath("D:\\目录 (1)\\my file.v2.mkv", "mkv")).toBe(
       "D:/目录 (1)/my file.v2.encoded.mkv",
     );
   });
 
   it("handles paths without extension or directory", () => {
-    expect(suggestOutputPath("video")).toBe("video.encoded.mkv");
+    expect(suggestOutputPath("video", "mkv")).toBe("video.encoded.mkv");
+    expect(suggestOutputPath("video", "mp4")).toBe("video.encoded.mp4");
+  });
+});
+
+describe("swapOutputExtension", () => {
+  it("replaces the container extension", () => {
+    expect(swapOutputExtension("D:/影片/样片.encoded.mkv", "mp4")).toBe(
+      "D:/影片/样片.encoded.mp4",
+    );
+    expect(swapOutputExtension("D:\\影片\\样片.mkv", "webm")).toBe(
+      "D:/影片/样片.webm",
+    );
+  });
+
+  it("appends an extension when missing", () => {
+    expect(swapOutputExtension("D:/影片/样片", "mkv")).toBe("D:/影片/样片.mkv");
+    expect(swapOutputExtension("样片.v2", "webm")).toBe("样片.webm");
+  });
+
+  it("leaves an empty path empty", () => {
+    expect(swapOutputExtension("   ", "mkv")).toBe("");
+  });
+});
+
+describe("containerFromPath / containerSupportsEncoder", () => {
+  it("reads a supported container from the path", () => {
+    expect(containerFromPath("D:/影片/样片.MKV")).toBe("mkv");
+    expect(containerFromPath("样片.mp4")).toBe("mp4");
+    expect(containerFromPath("样片.webm")).toBe("webm");
+    expect(containerFromPath("样片.avi")).toBeNull();
+    expect(containerFromPath("无扩展名")).toBeNull();
+  });
+
+  it("only WebM restricts the video encoder", () => {
+    expect(containerSupportsEncoder("mkv", "libx264")).toBe(true);
+    expect(containerSupportsEncoder("mp4", "libx265")).toBe(true);
+    expect(containerSupportsEncoder("webm", "libx264")).toBe(false);
+    expect(containerSupportsEncoder("webm", "av1_nvenc")).toBe(true);
   });
 });

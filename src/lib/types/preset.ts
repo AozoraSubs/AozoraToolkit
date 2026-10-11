@@ -1,7 +1,13 @@
-import type { AudioConfig, SubtitleConfig, VideoConfig } from "./encode";
+import type {
+  AudioConfig,
+  Container,
+  SubtitleConfig,
+  VideoConfig,
+} from "./encode";
 
-/** 预设中的输出选项：只保留与机器无关的覆盖策略，不含输出路径。 */
+/** 预设中的输出选项：只保留与机器无关的输出意图，不含输出路径。 */
 export interface PresetOutput {
+  container: Container;
   overwrite: boolean;
 }
 

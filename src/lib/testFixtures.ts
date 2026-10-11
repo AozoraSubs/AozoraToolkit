@@ -17,7 +17,7 @@ export function presetFixture(overrides: Partial<Preset> = {}): Preset {
     },
     audio: { mode: "copy" },
     subtitles: { mode: "drop", externalPath: null },
-    output: { overwrite: false },
+    output: { container: "mkv", overwrite: false },
     createdAtMs: 1,
     updatedAtMs: 1,
     ...overrides,
