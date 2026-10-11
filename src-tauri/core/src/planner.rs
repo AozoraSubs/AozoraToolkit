@@ -40,6 +40,13 @@ pub fn build_args(
         push(&mut args, "-pix_fmt");
         push(&mut args, pf);
     }
+    // 滤镜链：先缩放（分辨率），再烧录字幕——这样字幕按最终分辨率渲染，
+    // ASS 的对齐与边距也以输出画面为准。
+    let filters = video_filters(config);
+    if !filters.is_empty() {
+        push(&mut args, "-vf");
+        push(&mut args, filters.join(","));
+    }
 
     // 音频：复制全部音轨（M2 策略；映射细节属 M4）。
     push(&mut args, "-map");
@@ -62,13 +69,6 @@ pub fn build_args(
         encode::SubtitleMode::Burn => {
             // 烧录时丢弃视频内字幕轨，字幕由外部文件渲染进画面。
             push(&mut args, "-sn");
-            let path = config
-                .subtitles
-                .external_path
-                .as_ref()
-                .ok_or_else(|| "烧录字幕需要选择外部字幕文件（srt / ass）".to_string())?;
-            push(&mut args, "-vf");
-            push(&mut args, burn_subtitle_filter(path));
         }
     }
 
@@ -83,6 +83,50 @@ pub fn build_args(
 
 fn push(args: &mut Vec<OsString>, value: impl Into<OsString>) {
     args.push(value.into());
+}
+
+/// 生成视频滤镜链（顺序：缩放 → 烧录字幕）。
+fn video_filters(config: &EncodeConfig) -> Vec<String> {
+    let mut filters = Vec::new();
+    if let Some(resolution) = &config.video.resolution {
+        if resolution.is_set() {
+            filters.push(scale_filter(resolution));
+        }
+    }
+    if config.subtitles.mode == encode::SubtitleMode::Burn {
+        if let Some(path) = &config.subtitles.external_path {
+            filters.push(burn_subtitle_filter(path));
+        }
+    }
+    filters
+}
+
+/// 生成缩放滤镜。三种情形：
+///
+/// - 只给宽（或只给高）：另一边用 `-2` 按源宽高比自动计算，并保证偶数——
+///   x264 / x265 对 `yuv420p` 要求偶数尺寸，奇数会直接编码失败；
+/// - 宽高都给：`force_original_aspect_ratio=decrease` 把画面按宽高比缩放进
+///   给定框内（不拉伸、不裁剪），因此输出可能小于给定值；
+/// - 都没有：不生成滤镜（校验层不会构造这种 [`Resolution`]）。
+///
+/// 注意：`-2` 只保证**自动计算出来的那一边**是偶数，用户显式写的奇数
+/// （例如 641）不会被修正，因此这里先把给定值向下取到偶数。
+pub fn scale_filter(resolution: &encode::Resolution) -> String {
+    match (resolution.width, resolution.height) {
+        (Some(width), Some(height)) => format!(
+            "scale={}:{}:force_original_aspect_ratio=decrease",
+            even_dimension(width),
+            even_dimension(height)
+        ),
+        (Some(width), None) => format!("scale={}:-2", even_dimension(width)),
+        (None, Some(height)) => format!("scale=-2:{}", even_dimension(height)),
+        (None, None) => String::new(),
+    }
+}
+
+/// 向下取到偶数（`yuv420p` 要求宽高为偶数），且不小于允许的尺寸下限。
+fn even_dimension(value: u32) -> u32 {
+    (value & !1).max(encode::RESOLUTION_RANGE.0)
 }
 
 /// 按编码器家族生成视频质量参数（速度/质量预设 + 质量控制）。
@@ -465,6 +509,7 @@ mod tests {
                 quality_value: quality,
                 preset: preset.into(),
                 pixel_format: None,
+                resolution: None,
             },
             audio: AudioConfig {
                 mode: AudioMode::Copy,
@@ -686,6 +731,86 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    #[test]
+    fn scale_filter_handles_partial_and_full_resolution() {
+        let only_width = encode::Resolution {
+            width: Some(1280),
+            height: None,
+        };
+        // 只给宽：高按源宽高比自动计算，-2 同时保证偶数（x264/x265 要求）
+        assert_eq!(scale_filter(&only_width), "scale=1280:-2");
+
+        let only_height = encode::Resolution {
+            width: None,
+            height: Some(720),
+        };
+        assert_eq!(scale_filter(&only_height), "scale=-2:720");
+
+        let both = encode::Resolution {
+            width: Some(1920),
+            height: Some(1080),
+        };
+        // 两边都给：按宽高比缩放进框内，不拉伸、不裁剪
+        assert_eq!(
+            scale_filter(&both),
+            "scale=1920:1080:force_original_aspect_ratio=decrease"
+        );
+
+        // 显式给的奇数会被向下取到偶数（否则 x264 报 width not divisible by 2）
+        let odd = encode::Resolution {
+            width: Some(641),
+            height: Some(361),
+        };
+        assert_eq!(
+            scale_filter(&odd),
+            "scale=640:360:force_original_aspect_ratio=decrease"
+        );
+        let odd_single = encode::Resolution {
+            width: None,
+            height: Some(721),
+        };
+        assert_eq!(scale_filter(&odd_single), "scale=-2:720");
+
+        let none = encode::Resolution {
+            width: None,
+            height: None,
+        };
+        assert_eq!(scale_filter(&none), "");
+    }
+
+    #[test]
+    fn resolution_adds_scale_filter_before_subtitle_burn() {
+        // 只设分辨率：出现 -vf scale=…
+        let mut config = x264_config(20, "medium");
+        config.video.resolution = Some(encode::Resolution {
+            width: Some(1280),
+            height: None,
+        });
+        let joined =
+            join_args(&build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        assert!(joined.contains("-vf scale=1280:-2"), "args: {joined}");
+
+        // 没设分辨率：不出现 -vf
+        let plain = x264_config(20, "medium");
+        let joined =
+            join_args(&build_args(&plain, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        assert!(!joined.contains("-vf"), "args: {joined}");
+
+        // 分辨率 + 烧录字幕：滤镜链里缩放在前、字幕在后
+        let mut config = x264_config(20, "medium");
+        config.video.resolution = Some(encode::Resolution {
+            width: None,
+            height: Some(720),
+        });
+        config.subtitles.mode = SubtitleMode::Burn;
+        config.subtitles.external_path = Some(PathBuf::from(r"C:\字幕\sub.ass"));
+        let joined =
+            join_args(&build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        let scale_at = joined.find("scale=-2:720").expect("缺少 scale 滤镜");
+        let subtitles_at = joined.find("subtitles=filename=").expect("缺少字幕滤镜");
+        assert!(scale_at < subtitles_at, "缩放应在烧录字幕之前：{joined}");
     }
 
     #[test]

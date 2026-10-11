@@ -4,6 +4,8 @@ import {
   defaultVideoConfig,
   suggestOutputPath,
   swapOutputExtension,
+  validateResolution,
+  validateVideoConfig,
 } from "../encoders";
 import type {
   Container,
@@ -66,6 +68,14 @@ export function buildEncodeConfig(): EncodeConfig {
       overwrite: encodeForm.overwrite,
     },
   };
+}
+
+/** 校验表单里的编码参数（分辨率 + 编码器参数）；合法时返回 null。 */
+export function validateForm(): string | null {
+  return (
+    validateVideoConfig(encodeForm.video) ??
+    validateResolution(encodeForm.video.resolution)
+  );
 }
 
 /**

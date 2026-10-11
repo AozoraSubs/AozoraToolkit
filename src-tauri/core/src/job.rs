@@ -711,6 +711,119 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// 实机验证：分辨率调整（只给宽 / 宽高都给 / 奇数取偶）经 FFprobe 实测生效。
+    #[tokio::test]
+    #[ignore = "requires ffmpeg and ffprobe on PATH"]
+    async fn encode_applies_configured_resolution() {
+        use crate::encode::Resolution;
+        use crate::probe::probe_media;
+
+        let path_entries: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|value| std::env::split_paths(&value).collect())
+            .unwrap_or_default();
+        let ffmpeg = find_in_path("ffmpeg", &path_entries).expect("ffmpeg 未在 PATH 中检测到");
+        let ffprobe = find_in_path("ffprobe", &path_entries).expect("ffprobe 未在 PATH 中检测到");
+
+        let dir = temp_dir("resolution");
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.mkv");
+        generate_input(&ffmpeg, &input, 1);
+        let source = probe_media(&ffprobe, &input).expect("输入探测失败");
+        let source_w = source.video_streams[0].width.expect("输入宽度");
+        let source_h = source.video_streams[0].height.expect("输入高度");
+        let source_ratio = source_w as f64 / source_h as f64;
+
+        // (说明, 分辨率, 期望宽, 期望高)
+        let cases = [
+            // 只给宽：高按源宽高比自动计算
+            (
+                "只给宽",
+                Resolution {
+                    width: Some(640),
+                    height: None,
+                },
+                640u32,
+                (640.0 / source_ratio).round() as u32,
+            ),
+            // 两边都给且与源同比例：输出就是给定尺寸
+            (
+                "同比例框",
+                Resolution {
+                    width: Some(640),
+                    height: Some((640.0 / source_ratio).round() as u32),
+                },
+                640,
+                (640.0 / source_ratio).round() as u32,
+            ),
+            // 奇数宽度：scale 会把结果取到偶数（x264 要求 yuv420p 偶数尺寸）
+            (
+                "奇数取偶",
+                Resolution {
+                    width: Some(641),
+                    height: None,
+                },
+                640,
+                ((640.0 / source_ratio).round() as u32) & !1,
+            ),
+        ];
+
+        for (label, resolution, expect_w, expect_h) in cases {
+            let output = dir.join(format!("out-{expect_w}x{expect_h}.mkv"));
+            std::fs::remove_file(&output).ok();
+            let mut config = config_for("libx264", "ultrafast", 30);
+            config.video.resolution = Some(resolution);
+            config.output.path = output.clone();
+            let temp = planner::temp_output_path(&dir, &output, "e-test-resolution");
+            let args = planner::build_args(&config, &input, &temp).unwrap();
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (event_tx, _event_rx) = collect_events();
+
+            let result = run_encode(
+                EncodeRequest {
+                    ffmpeg_path: ffmpeg.clone(),
+                    args,
+                    input_path: input.clone(),
+                    temp_path: temp.clone(),
+                    final_path: output.clone(),
+                    overwrite: true,
+                    duration_secs: None,
+                    cancel: cancel_rx,
+                },
+                event_tx,
+            )
+            .await;
+
+            assert_eq!(
+                result.status,
+                EncodeStatus::Completed,
+                "{label} 失败：{:?}",
+                result.error
+            );
+            let info = probe_media(&ffprobe, &output).expect("输出探测失败");
+            let width = info.video_streams[0].width.expect("输出宽度");
+            let height = info.video_streams[0].height.expect("输出高度");
+            assert_eq!(width, expect_w, "{label} 输出宽度不符");
+            assert_eq!(height, expect_h, "{label} 输出高度不符");
+            assert_eq!(width % 2, 0, "{label} 输出宽度应为偶数");
+            assert_eq!(height % 2, 0, "{label} 输出高度应为偶数");
+        }
+
+        // 只给宽那一档用来核对宽高比未被改变
+        let scaled_output = dir.join(format!(
+            "out-640x{}.mkv",
+            (640.0 / source_ratio).round() as u32
+        ));
+        let scaled = probe_media(&ffprobe, &scaled_output).expect("输出探测失败");
+        let ratio = scaled.video_streams[0].width.unwrap() as f64
+            / scaled.video_streams[0].height.unwrap() as f64;
+        assert!(
+            (ratio - source_ratio).abs() < 0.05,
+            "宽高比被改变：源 {source_ratio:.3} → 输出 {ratio:.3}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// 实机验证：输入不存在 → 失败，临时文件被清理，不产生成品。
     #[tokio::test]
     #[ignore = "requires ffmpeg on PATH"]

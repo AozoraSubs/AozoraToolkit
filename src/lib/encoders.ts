@@ -2,6 +2,7 @@ import type {
   Container,
   EncoderCapabilityKey,
   QualityMode,
+  Resolution,
   VideoConfig,
 } from "./types/encode";
 import type { CapabilityReport, EncoderAvailability } from "./types/tools";
@@ -412,7 +413,69 @@ export function defaultVideoConfig(encoderId: string): VideoConfig {
     qualityValue: def.defaultQuality,
     preset: def.defaultPreset,
     pixelFormat: def.defaultPixelFormat,
+    resolution: null,
   };
+}
+
+/** 分辨率允许范围（与 Rust `RESOLUTION_RANGE` 一致）。 */
+export const RESOLUTION_RANGE: [number, number] = [16, 8192];
+
+/** 常见分辨率快捷选项（宽 / 高，null = 按源比例自动）。 */
+export const RESOLUTION_PRESETS: ReadonlyArray<{
+  label: string;
+  resolution: Resolution | null;
+}> = [
+  { label: "源分辨率", resolution: null },
+  { label: "1080p（1920×1080）", resolution: { width: 1920, height: 1080 } },
+  { label: "720p（1280×720）", resolution: { width: 1280, height: 720 } },
+  { label: "480p（854×480）", resolution: { width: 854, height: 480 } },
+];
+
+/** 分辨率是否设置了任何一边。 */
+export function resolutionIsSet(resolution: Resolution | null): boolean {
+  return (
+    !!resolution && (resolution.width !== null || resolution.height !== null)
+  );
+}
+
+/** 向下取到偶数（与 Rust `even_dimension` 一致，编码器要求偶数尺寸）。 */
+export function evenDimension(value: number): number {
+  return Math.max(value - (value % 2 === 0 ? 0 : 1), RESOLUTION_RANGE[0]);
+}
+
+/**
+ * 校验分辨率：返回可读错误信息，合法时返回 null。
+ * 两边都为空视为"保持源分辨率"，合法。
+ */
+export function validateResolution(
+  resolution: Resolution | null,
+): string | null {
+  if (!resolution) {
+    return null;
+  }
+  const [min, max] = RESOLUTION_RANGE;
+  for (const [label, value] of [
+    ["宽度", resolution.width],
+    ["高度", resolution.height],
+  ] as const) {
+    if (value === null) {
+      continue;
+    }
+    if (!Number.isInteger(value) || value < min || value > max) {
+      return `输出分辨率${label}需为 ${min}–${max} 之间的整数（当前：${value}）`;
+    }
+  }
+  return null;
+}
+
+/** 分辨率里显式给出的奇数尺寸（界面提示会被取到偶数）。 */
+export function oddDimensions(resolution: Resolution | null): number[] {
+  if (!resolution) {
+    return [];
+  }
+  return [resolution.width, resolution.height].filter(
+    (value): value is number => value !== null && value % 2 !== 0,
+  );
 }
 
 /** 校验视频配置；返回可读错误信息，合法时返回 null。 */

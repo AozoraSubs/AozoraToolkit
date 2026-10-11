@@ -10,6 +10,20 @@ export interface VideoConfig {
   qualityValue: number;
   preset: string;
   pixelFormat: string | null;
+  /** 输出分辨率；null = 保持源分辨率。 */
+  resolution: Resolution | null;
+}
+
+/**
+ * 输出分辨率：宽高可单独留空。
+ *
+ * 只填一边时另一边按源画面宽高比自动计算；两边都填时画面会按宽高比缩放
+ * 进给定框内（不拉伸、不裁剪，因此输出可能小于给定值）。显式填入的奇数
+ * 会被向下取到偶数（`yuv420p` 要求偶数尺寸）。
+ */
+export interface Resolution {
+  width: number | null;
+  height: number | null;
 }
 
 export interface AudioConfig {

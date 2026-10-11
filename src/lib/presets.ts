@@ -1,11 +1,34 @@
 import {
   CONTAINER_OPTIONS,
+  RESOLUTION_RANGE,
   encoderDefinition,
   encoderUsable,
+  evenDimension,
+  resolutionIsSet,
 } from "./encoders";
-import type { Container, SubtitleMode, VideoConfig } from "./types/encode";
+import type {
+  Container,
+  Resolution,
+  SubtitleMode,
+  VideoConfig,
+} from "./types/encode";
 import type { Preset, PresetInput } from "./types/preset";
 import type { CapabilityReport } from "./types/tools";
+
+/** 分辨率摘要（列表展示用）。 */
+export function resolutionSummary(resolution: Resolution | null): string {
+  if (!resolutionIsSet(resolution)) {
+    return "源分辨率";
+  }
+  const width = resolution?.width ?? null;
+  const height = resolution?.height ?? null;
+  if (width !== null && height !== null) {
+    return `${evenDimension(width)}×${evenDimension(height)} 以内`;
+  }
+  return width !== null
+    ? `宽 ${evenDimension(width)}`
+    : `高 ${evenDimension(height ?? RESOLUTION_RANGE[0])}`;
+}
 
 /** 预设参数摘要（列表展示用）。 */
 export function presetSummary(preset: Preset): string {
@@ -13,6 +36,7 @@ export function presetSummary(preset: Preset): string {
   const label = def?.label ?? preset.video.encoderId;
   const quality = `${def?.qualityLabel ?? "质量"} ${preset.video.qualityValue}`;
   const pixel = preset.video.pixelFormat ?? "自动位深";
+  const resolution = resolutionSummary(preset.video.resolution);
   const subtitle =
     preset.subtitles.mode === "copy"
       ? "保留全部字幕轨"
@@ -23,7 +47,7 @@ export function presetSummary(preset: Preset): string {
     (option) => option.id === preset.output.container,
   );
   const overwrite = preset.output.overwrite ? "覆盖已有输出" : "不覆盖输出";
-  return `${label} · ${quality} · ${preset.video.preset} · ${pixel} · ${subtitle} · ${
+  return `${label} · ${quality} · ${preset.video.preset} · ${pixel} · ${resolution} · ${subtitle} · ${
     container?.label ?? preset.output.container
   } · ${overwrite}`;
 }
@@ -69,9 +93,21 @@ export function matchesPreset(
     video.qualityValue === preset.video.qualityValue &&
     video.preset === preset.video.preset &&
     video.pixelFormat === preset.video.pixelFormat &&
+    sameResolution(video.resolution, preset.video.resolution) &&
     subtitleMode === preset.subtitles.mode &&
     container === preset.output.container &&
     overwrite === preset.output.overwrite
+  );
+}
+
+/** 两个分辨率设置是否等价（null 与"两边都空"视为同一件事）。 */
+function sameResolution(a: Resolution | null, b: Resolution | null): boolean {
+  if (!resolutionIsSet(a) && !resolutionIsSet(b)) {
+    return true;
+  }
+  return (
+    (a?.width ?? null) === (b?.width ?? null) &&
+    (a?.height ?? null) === (b?.height ?? null)
   );
 }
 

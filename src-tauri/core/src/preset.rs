@@ -159,6 +159,8 @@ fn builtin_video(
         quality_value,
         preset: preset.to_string(),
         pixel_format: pixel_format.map(str::to_string),
+        // 内置预设不锁分辨率：由用户在压制页决定
+        resolution: None,
     }
 }
 
@@ -531,6 +533,7 @@ mod tests {
                 quality_value: 16,
                 preset: "slow".to_string(),
                 pixel_format: Some("yuv420p10le".to_string()),
+                resolution: None,
             },
             audio: AudioConfig::default(),
             subtitles: SubtitleConfig::default(),

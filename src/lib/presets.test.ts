@@ -6,6 +6,7 @@ import {
   presetFileName,
   presetSummary,
   presetToInput,
+  resolutionSummary,
 } from "./presets";
 import { describe, expect, it } from "vitest";
 import type { CapabilityReport } from "./types/tools";
@@ -125,6 +126,55 @@ describe("matchesPreset", () => {
     expect(
       matchesPreset(preset, { ...preset.video }, "drop", "mkv", false),
     ).toBe(true);
+  });
+
+  it("compares the configured resolution", () => {
+    const resolution = { width: 1920, height: 1080 };
+    const preset = presetFixture({
+      video: { ...presetFixture().video, resolution },
+    });
+    expect(
+      matchesPreset(preset, { ...preset.video }, "drop", "mkv", false),
+    ).toBe(true);
+    // 分辨率被改动 → 标注"参数已修改"
+    expect(
+      matchesPreset(
+        preset,
+        { ...preset.video, resolution: { width: 1280, height: 720 } },
+        "drop",
+        "mkv",
+        false,
+      ),
+    ).toBe(false);
+    // 预设未设分辨率时，"null"与"两边都空"等价
+    const noResolution = presetFixture();
+    expect(
+      matchesPreset(
+        noResolution,
+        { ...noResolution.video, resolution: { width: null, height: null } },
+        "drop",
+        "mkv",
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("summarises the resolution in preset text", () => {
+    expect(resolutionSummary(null)).toBe("源分辨率");
+    expect(resolutionSummary({ width: null, height: null })).toBe("源分辨率");
+    expect(resolutionSummary({ width: 1280, height: null })).toBe("宽 1280");
+    expect(resolutionSummary({ width: null, height: 721 })).toBe("高 720");
+    expect(resolutionSummary({ width: 1920, height: 1080 })).toBe(
+      "1920×1080 以内",
+    );
+    // 预设摘要包含分辨率
+    const preset = presetFixture({
+      video: {
+        ...presetFixture().video,
+        resolution: { width: 640, height: null },
+      },
+    });
+    expect(presetSummary(preset)).toContain("宽 640");
   });
 
   it("reports modifications of any preset field", () => {

@@ -5,16 +5,21 @@
   import { onDestroy, onMount } from "svelte";
   import {
     CONTAINER_OPTIONS,
+    RESOLUTION_PRESETS,
+    RESOLUTION_RANGE,
     containerFromPath,
     containerSupportsAudioCodec,
     containerSupportsEncoder,
     ENCODER_DEFINITIONS,
     encoderDefinition,
     encoderUsable,
+    evenDimension,
+    oddDimensions,
     pickDefaultEncoder,
+    resolutionIsSet,
     suggestOutputPath,
     swapOutputExtension,
-    validateVideoConfig,
+    validateResolution,
     vendorLabel,
     type EncoderVendor,
   } from "../encoders";
@@ -26,6 +31,7 @@
     loadInputFile,
     resetVideoForEncoder,
     setOutputContainer,
+    validateForm,
   } from "../stores/encodeForm.svelte";
   import {
     clearFinishedJob,
@@ -40,7 +46,7 @@
     userPresets,
   } from "../stores/presets.svelte";
   import { refreshCapabilities, toolsState } from "../stores/tools.svelte";
-  import type { Container, EnqueueResult } from "../types/encode";
+  import type { Container, EnqueueResult, Resolution } from "../types/encode";
   import { copyText, formatCommandLine } from "../utils/command";
   import { formatBytes, formatSeconds } from "../utils/format";
 
@@ -106,6 +112,49 @@
       containerFromPath(encodeForm.outputPath) !== encodeForm.container,
   );
 
+  /** 分辨率提示：说明输出会是多大、或两边都给时是"缩放进框内"。 */
+  const resolutionHint = $derived.by(() => {
+    const resolution = encodeForm.video.resolution;
+    if (!resolutionIsSet(resolution)) {
+      return "";
+    }
+    const width = resolution?.width ?? null;
+    const height = resolution?.height ?? null;
+    if (width !== null && height !== null) {
+      return `输出画面按宽高比缩放进 ${evenDimension(width)}×${evenDimension(height)} 内，不拉伸、不裁剪`;
+    }
+    if (width !== null) {
+      const source = info?.videoStreams[0];
+      const sourceWidth = source?.width ?? null;
+      const sourceHeight = source?.height ?? null;
+      if (sourceWidth && sourceHeight) {
+        const scaled = Math.round(
+          (evenDimension(width) * sourceHeight) / sourceWidth,
+        );
+        return `高度按源比例自动计算：约 ${evenDimension(width)}×${evenDimension(scaled)}（偶数取整）`;
+      }
+      return "高度按源比例自动计算";
+    }
+    return "宽度按源比例自动计算";
+  });
+
+  /** 分辨率警告：显式填入的奇数会被取到偶数，这里明确告知。 */
+  const resolutionWarning = $derived.by(() => {
+    const odd = oddDimensions(encodeForm.video.resolution);
+    if (odd.length === 0) {
+      return "";
+    }
+    const mapped = odd
+      .map((value) => `${value} → ${evenDimension(value)}`)
+      .join("、");
+    return `${mapped}：编码器要求偶数尺寸，已向下取偶`;
+  });
+
+  /** 分辨率校验错误（超出范围、非整数等）。 */
+  const resolutionError = $derived(
+    validateResolution(encodeForm.video.resolution),
+  );
+
   /**
    * 能力检测完成后（或用户换了 FFmpeg 实例后），若当前编码器在本机不可用
    * （例如预设里保存的是 NVENC，但这台机器没有 NVIDIA 显卡），
@@ -139,6 +188,38 @@
 
   function isAvailable(encoderId: string): boolean {
     return encoderUsable(capabilities, encoderId);
+  }
+
+  /** 从输入框文本更新分辨率的一边；留空表示"自动"。 */
+  function parseDimension(raw: string): number | null {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const value = Number(trimmed);
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+
+  function updateResolutionWidth(raw: string) {
+    const width = parseDimension(raw);
+    const current = encodeForm.video.resolution;
+    const next = { width, height: current?.height ?? null };
+    // 两边都空 = 保持源分辨率（与后端语义一致）
+    encodeForm.video.resolution =
+      next.width === null && next.height === null ? null : next;
+  }
+
+  function updateResolutionHeight(raw: string) {
+    const height = parseDimension(raw);
+    const current = encodeForm.video.resolution;
+    const next = { width: current?.width ?? null, height };
+    encodeForm.video.resolution =
+      next.width === null && next.height === null ? null : next;
+  }
+
+  /** 应用常见分辨率选项（null = 源分辨率）。 */
+  function applyResolutionPreset(resolution: Resolution | null) {
+    encodeForm.video.resolution = resolution ? { ...resolution } : null;
   }
 
   async function pickSubtitleFile() {
@@ -250,7 +331,7 @@
       formError = "请先导入输入文件并设置输出路径";
       return;
     }
-    const validationError = validateVideoConfig(encodeForm.video);
+    const validationError = validateForm();
     if (validationError) {
       formError = validationError;
       return;
@@ -603,6 +684,69 @@
             <option value={option.value ?? ""}>{option.label}</option>
           {/each}
         </select>
+      </label>
+
+      <label class="field wide">
+        <span class="field-label">输出分辨率</span>
+        <div class="resolution-row">
+          <input
+            type="number"
+            placeholder="宽"
+            min={RESOLUTION_RANGE[0]}
+            max={RESOLUTION_RANGE[1]}
+            value={encodeForm.video.resolution?.width ?? ""}
+            onchange={(e) => {
+              updateResolutionWidth(e.currentTarget.value);
+              void refreshPreview();
+            }}
+          />
+          <span class="resolution-times">×</span>
+          <input
+            type="number"
+            placeholder="高"
+            min={RESOLUTION_RANGE[0]}
+            max={RESOLUTION_RANGE[1]}
+            value={encodeForm.video.resolution?.height ?? ""}
+            onchange={(e) => {
+              updateResolutionHeight(e.currentTarget.value);
+              void refreshPreview();
+            }}
+          />
+          <select
+            class="resolution-preset"
+            value=""
+            onchange={(e) => {
+              const raw = e.currentTarget.value;
+              const index = Number(raw);
+              applyResolutionPreset(
+                raw === "" || Number.isNaN(index)
+                  ? null
+                  : RESOLUTION_PRESETS[index].resolution,
+              );
+              e.currentTarget.value = "";
+              void refreshPreview();
+            }}
+          >
+            <option value="">常用分辨率…</option>
+            {#each RESOLUTION_PRESETS as option, index (option.label)}
+              <option value={index}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+        {#if info}
+          <span class="field-hint">
+            源 {info.videoStreams[0]?.width ?? "?"}×{info.videoStreams[0]
+              ?.height ?? "?"}；留空 = 保持源分辨率
+          </span>
+        {/if}
+        {#if resolutionHint}
+          <span class="field-hint">{resolutionHint}</span>
+        {/if}
+        {#if resolutionError}
+          <span class="field-hint warn">{resolutionError}</span>
+        {:else if resolutionWarning}
+          <span class="field-hint warn">{resolutionWarning}</span>
+        {/if}
       </label>
 
       <label class="field">
@@ -1148,6 +1292,25 @@
   .row {
     display: flex;
     gap: 8px;
+  }
+
+  /* 分辨率：宽 × 高 + 常用档位（占满一行，避免与相邻字段挤压） */
+  .resolution-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .resolution-row input[type="number"] {
+    width: 88px;
+  }
+
+  .resolution-row .resolution-preset {
+    max-width: 220px;
+  }
+
+  .resolution-times {
+    color: var(--color-text-secondary);
   }
 
   .row input,

@@ -54,7 +54,33 @@ pub struct VideoConfig {
     pub preset: String,
     /// 像素格式；`None` 表示自动（不传 `-pix_fmt`，由编码器选择）。
     pub pixel_format: Option<String>,
+    /// 输出分辨率；`None` 表示保持源分辨率（不插入 scale 滤镜）。
+    /// 旧配置 / 旧预设无此字段时按"保持源分辨率"处理。
+    #[serde(default)]
+    pub resolution: Option<Resolution>,
 }
+
+/// 输出分辨率：宽高都可单独留空。
+///
+/// 只填一边时另一边按源画面宽高比自动计算（并保证偶数）；两边都填时
+/// 画面按宽高比缩放到"不超出给定框"的尺寸，不做拉伸或裁剪（见
+/// [`crate::planner::scale_filter`]）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Resolution {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+impl Resolution {
+    /// 是否指定了任何一边（两边都为空等于保持源分辨率）。
+    pub fn is_set(&self) -> bool {
+        self.width.is_some() || self.height.is_some()
+    }
+}
+
+/// 分辨率允许的范围：下限 16（编码器普遍要求 ≥ 16），上限 8192。
+pub const RESOLUTION_RANGE: (u32, u32) = (16, 8192);
 
 impl Default for VideoConfig {
     fn default() -> Self {
@@ -65,6 +91,7 @@ impl Default for VideoConfig {
             quality_value: spec.default_quality,
             preset: spec.default_preset.to_string(),
             pixel_format: None,
+            resolution: None,
         }
     }
 }
@@ -624,6 +651,18 @@ pub fn validate_config(config: &EncodeConfig) -> Result<(), String> {
             ));
         }
     }
+    if let Some(resolution) = &config.video.resolution {
+        let (min, max) = RESOLUTION_RANGE;
+        for (label, value) in [("宽度", resolution.width), ("高度", resolution.height)] {
+            if let Some(value) = value {
+                if !(min..=max).contains(&value) {
+                    return Err(format!(
+                        "输出分辨率{label} {value} 超出支持范围（{min}–{max}）"
+                    ));
+                }
+            }
+        }
+    }
     match config.audio.mode {
         AudioMode::Copy => {}
     }
@@ -732,6 +771,10 @@ mod tests {
                 quality_value: 16,
                 preset: "slow".into(),
                 pixel_format: Some("yuv420p10le".into()),
+                resolution: Some(Resolution {
+                    width: Some(1920),
+                    height: Some(1080),
+                }),
             },
             audio: AudioConfig::default(),
             subtitles: SubtitleConfig::default(),
@@ -750,11 +793,64 @@ mod tests {
         );
         assert!(json.contains("\"container\":\"mkv\""), "json: {json}");
         assert!(
+            json.contains(r#""resolution":{"width":1920,"height":1080}"#),
+            "json: {json}"
+        );
+        assert!(
             json.contains(r#""subtitles":{"mode":"drop","externalPath":null}"#),
             "json: {json}"
         );
         let restored: EncodeConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, config);
+    }
+
+    #[test]
+    fn resolution_accepts_partial_and_empty_values() {
+        // 只给一边：另一边按源宽高比自动计算
+        let partial = Resolution {
+            width: Some(1280),
+            height: None,
+        };
+        assert!(partial.is_set());
+        assert!(validate_config(&config_with_resolution(Some(partial))).is_ok());
+
+        // 两边都空 = 保持源分辨率（不插入 scale 滤镜）
+        let empty = Resolution {
+            width: None,
+            height: None,
+        };
+        assert!(!empty.is_set());
+        assert!(validate_config(&config_with_resolution(Some(empty))).is_ok());
+
+        // 完全没有分辨率设置
+        assert!(validate_config(&config_with_resolution(None)).is_ok());
+    }
+
+    #[test]
+    fn resolution_out_of_range_is_rejected() {
+        for resolution in [
+            Resolution {
+                width: Some(0),
+                height: None,
+            },
+            Resolution {
+                width: None,
+                height: Some(8),
+            },
+            Resolution {
+                width: Some(99999),
+                height: None,
+            },
+        ] {
+            let err = validate_config(&config_with_resolution(Some(resolution))).unwrap_err();
+            assert!(err.contains("输出分辨率"), "error: {err}");
+        }
+    }
+
+    fn config_with_resolution(resolution: Option<Resolution>) -> EncodeConfig {
+        let mut config = EncodeConfig::default();
+        config.video.resolution = resolution;
+        config
     }
 
     #[test]
@@ -775,6 +871,8 @@ mod tests {
         assert_eq!(config.subtitles.mode, SubtitleMode::Drop);
         // 旧配置（加容器选择之前保存的 JSON）没有 container 字段：默认 MKV
         assert_eq!(config.output.container, Container::Mkv);
+        // 旧配置也没有 resolution 字段：保持源分辨率
+        assert_eq!(config.video.resolution, None);
     }
 
     #[test]

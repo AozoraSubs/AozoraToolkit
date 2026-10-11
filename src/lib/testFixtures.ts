@@ -14,6 +14,7 @@ export function presetFixture(overrides: Partial<Preset> = {}): Preset {
       qualityValue: 16,
       preset: "slow",
       pixelFormat: "yuv420p10le",
+      resolution: null,
     },
     audio: { mode: "copy" },
     subtitles: { mode: "drop", externalPath: null },

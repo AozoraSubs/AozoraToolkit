@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ENCODER_DEFINITIONS,
+  RESOLUTION_PRESETS,
   availableEncoderMap,
   containerFromPath,
   containerSupportsAudioCodec,
@@ -8,9 +9,13 @@ import {
   defaultVideoConfig,
   encoderDefinition,
   encoderUsable,
+  evenDimension,
+  oddDimensions,
   pickDefaultEncoder,
+  resolutionIsSet,
   suggestOutputPath,
   swapOutputExtension,
+  validateResolution,
   validateVideoConfig,
   vendorLabel,
 } from "./encoders";
@@ -45,11 +50,59 @@ describe("defaultVideoConfig", () => {
       qualityValue: 18,
       preset: "slow",
       pixelFormat: "yuv420p10le",
+      // 默认保持源分辨率
+      resolution: null,
     });
   });
 
   it("falls back to first definition for unknown id", () => {
     expect(defaultVideoConfig("unknown").encoderId).toBe("libx264");
+  });
+});
+
+describe("分辨率设置", () => {
+  it("校验宽高范围与整数要求", () => {
+    expect(validateResolution(null)).toBeNull();
+    expect(validateResolution({ width: null, height: null })).toBeNull();
+    expect(validateResolution({ width: 1920, height: 1080 })).toBeNull();
+    // 只填一边也合法
+    expect(validateResolution({ width: 1280, height: null })).toBeNull();
+    expect(validateResolution({ width: null, height: 720 })).toBeNull();
+    expect(validateResolution({ width: 15, height: null })).toContain("宽度");
+    expect(validateResolution({ width: null, height: 99999 })).toContain(
+      "高度",
+    );
+    expect(validateResolution({ width: 1280.5, height: null })).toContain(
+      "整数",
+    );
+  });
+
+  it("识别显式填入的奇数尺寸并向下取偶", () => {
+    expect(oddDimensions({ width: 641, height: 361 })).toEqual([641, 361]);
+    expect(oddDimensions({ width: 640, height: null })).toEqual([]);
+    expect(oddDimensions(null)).toEqual([]);
+    expect(evenDimension(641)).toBe(640);
+    expect(evenDimension(640)).toBe(640);
+    // 不小于尺寸下限
+    expect(evenDimension(17)).toBe(16);
+    expect(evenDimension(16)).toBe(16);
+  });
+
+  it("判断是否设置了分辨率", () => {
+    expect(resolutionIsSet(null)).toBe(false);
+    expect(resolutionIsSet({ width: null, height: null })).toBe(false);
+    expect(resolutionIsSet({ width: 1920, height: null })).toBe(true);
+    expect(resolutionIsSet({ width: null, height: 1080 })).toBe(true);
+  });
+
+  it("提供常见分辨率档位，含保持源分辨率", () => {
+    expect(RESOLUTION_PRESETS[0].resolution).toBeNull();
+    expect(RESOLUTION_PRESETS.map((option) => option.label)).toContain(
+      "1080p（1920×1080）",
+    );
+    for (const option of RESOLUTION_PRESETS.slice(1)) {
+      expect(validateResolution(option.resolution)).toBeNull();
+    }
   });
 });
 
