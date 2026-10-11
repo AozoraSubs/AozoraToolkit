@@ -33,7 +33,7 @@
 - JavaScript 包管理器：pnpm；本项目不使用 npm 或 Yarn 管理依赖。
 - 桌面框架：Tauri 2。
 - **分发目标**：Windows 10/11 x64 桌面端；桌面打包只验证 Windows 的 MSI 安装包（NSIS 不在范围内）。
-- **CI 检查与构建**：每次推送 / PR 由独立的检查工作流（`.github/workflows/checks.yml`）在 Windows / macOS / Linux 三平台运行**检查**（前端 check/lint/format/test + `cargo fmt`/`clippy`/`test`），不执行打包；发布与周快照工作流复用纯构建工作流（`.github/workflows/build.yml`，`build_bundles: true`）执行**完整打包**（Windows MSI、macOS dmg、Linux deb + AppImage）并上传产物——`build.yml` 在打包前通过 `workflow_call` 复用 `checks.yml`，对与构建完全相同的目标提交运行同一套三平台检查，检查通过才开始打包（不要改成查询"最近一次 checks 运行记录"：发布流程推送版本提交用的是 `GITHUB_TOKEN`，这类推送不会创建新的工作流运行，查记录只会等到超时）。这不等同于全平台发布承诺：macOS 产物使用 ad-hoc 签名、不公证（首次打开仍需在「系统设置 → 隐私与安全性」中允许，或移除 quarantine 属性，见 README）；其他平台的运行时问题按低优先级处理，不阻塞 Windows 主目标。
+- **CI 检查与构建**：每次推送 / PR 由独立的检查工作流（`.github/workflows/checks.yml`）在 Windows / macOS / Linux 三平台运行**检查**（前端 check/lint/format/test + `cargo fmt`/`clippy`/`test`），不执行打包；发布与周快照工作流复用纯构建工作流（`.github/workflows/build.yml`，`build_bundles: true`）执行**完整打包**（Windows MSI、macOS dmg、Linux deb + AppImage）并上传产物——检查命令只有一份，放在 `.github/actions/run-checks` 复合动作里：`checks.yml` 直接调用它，`build.yml` 在打包前于同一个 runner 调用同一动作，检查通过才开始打包（不要把 `build.yml` 改成查询"最近一次 checks 运行记录"：发布流程推送版本提交用的是 `GITHUB_TOKEN`，这类推送不会创建新的工作流运行，查记录只会等到超时；也不要把检查命令复制到第二处）。这不等同于全平台发布承诺：macOS 产物使用 ad-hoc 签名、不公证（首次打开仍需在「系统设置 → 隐私与安全性」中允许，或移除 quarantine 属性，见 README）；其他平台的运行时问题按低优先级处理，不阻塞 Windows 主目标。
 - **移动端**（Android/iOS）不在范围内：不保留 `cdylib`、不配置移动 capabilities、不验证移动构建。
 - 核心任务、配置验证、进程管理：Rust。
 - 媒体处理：通过外部 FFmpeg / FFprobe 进程完成。

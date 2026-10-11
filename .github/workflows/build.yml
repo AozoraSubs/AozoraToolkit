@@ -1,8 +1,8 @@
 name: build
 
 # 纯构建工作流：仅由发布 / 周快照工作流通过 workflow_call 复用。
-# 打包前先在目标提交上运行同一套三平台检查（直接复用 checks.yml），检查通过才打包。
-# 这里不查"最近一次 checks 运行记录"：发布流程推送版本提交用的是 GITHUB_TOKEN，
+# 打包前在同一个 runner 上运行 .github/actions/run-checks 复合动作（与 checks.yml 完全同一份命令），
+# 通过才打包；不查"最近一次 checks 运行记录"——发布流程推送版本提交用的是 GITHUB_TOKEN，
 # 这类推送不会创建新的工作流运行，去查记录只会等到超时。
 on:
   workflow_call:
@@ -27,14 +27,7 @@ permissions:
   contents: read
 
 jobs:
-  # 打包前检查：复用 checks.yml，对与构建完全相同的提交运行三平台检查
-  checks:
-    uses: ./.github/workflows/checks.yml
-    with:
-      ref: ${{ inputs.ref || github.sha }}
-
   build:
-    needs: checks
     strategy:
       fail-fast: false
       matrix:
@@ -93,6 +86,10 @@ jobs:
 
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
+
+      - name: 打包前检查（与 checks.yml 同一份命令）
+        if: inputs.build_bundles == true
+        uses: ./.github/actions/run-checks
 
       - name: 构建并打包
         if: inputs.build_bundles == true

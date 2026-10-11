@@ -1,0 +1,22 @@
+name: run-checks
+description: 运行前端与 Rust 检查；checks.yml（推送 / PR）与 build.yml（打包前）共用这一份命令
+
+runs:
+  using: composite
+  steps:
+    - name: 前端检查
+      shell: bash
+      run: |
+        pnpm run check
+        pnpm run lint
+        pnpm run format:check
+        pnpm test
+
+    - name: Rust 检查
+      shell: bash
+      # 复合动作的 run 步骤统一用 bash（三个平台都具备），用 cd 而不是 working-directory
+      run: |
+        cd src-tauri
+        cargo fmt --check
+        cargo clippy --all-targets --all-features -- -D warnings
+        cargo test

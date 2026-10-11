@@ -470,6 +470,16 @@
 - **PLAN 更新：** 无清单勾选变化；本记录新增。
 - **剩余工作：** 推送后触发一次 Create Release 验证；CHANGELOG.md 中由失败发布写入的 `## 0.3.0` 段落与"最新在最下"的追加顺序按用户选择本次不处理。
 
+### 2026-10-11（CI 修复三）：检查命令抽成复合动作，去掉三层工作流嵌套
+
+- **起因（用户质疑）：** `release.yml → build.yml → checks.yml` 的三层可复用工作流调用容易被误读为"release.yml 里有检查作业"。实际结构是：`release.yml` 只有 `bump-version` / `build`（转调）/ `create-release` 三个作业，其中 `bump-version` 里那个 `id: check` 步骤只解析 base tag 与统计提交数；检查作业在 `build.yml` 内（`checks`），而它复用了 `checks.yml`，于是形成第三层嵌套。
+- **用户确认：** 改用方案 C——把检查命令抽成复合动作（复合动作不算工作流嵌套），既去掉第三层，又不重复命令。
+- **本次完成：** ① 新增 `.github/actions/run-checks/action.yml`：前端 4 项（`check` / `lint` / `format:check` / `test`）与 Rust 3 项（`fmt --check` / `clippy -D warnings` / `test`，`cd src-tauri`），三个平台统一 `shell: bash`；② `checks.yml` 改为调用该动作，并撤销上一轮为 `workflow_call` 添加的触发器与 `ref` 输入（不再需要）；③ `build.yml` 删除 `checks` 作业与 `needs: checks`，改为在 `build_bundles == true` 时于**同一个 runner** 上、打包之前调用同一动作。
+- **效果：** 嵌套层级回到两层（`release.yml` / `weekly-snapshot.yml` → `build.yml`）；检查命令只有一份；每个平台少一个 runner（发布与周快照各少 3 个），检查与打包在同一 runner 上顺序执行，检查失败即在该步骤中止、不会产出任何安装包。
+- **验证方式与结果：** 本机实跑复合动作里的同 7 条命令（`pnpm run check` / `lint` / `format:check` / `test`，`cargo fmt --check` / `clippy --all-targets --all-features -- -D warnings` / `test`）全部通过，见下方执行记录；`pnpm run format:check` 覆盖新的 `action.yml`；三个工作流文件经 js-yaml 解析并核对 `uses` 路径与输入引用。
+- **限制：** 本机无法执行 GitHub Actions；`shell: bash` 在 Windows runner 上的 PATH 可用性（cargo / pnpm）与首次真实运行仍需推送后确认——本仓库既有的 Windows `shell: bash` 步骤（快照产物重命名）已连续成功，风险低。
+- **剩余工作（按用户要求另开任务）：** 发布流程的版本提交未同步 `src-tauri/Cargo.lock`（`git add` 列表与 `tools/update-version.mjs` 都不含它），而 `Cargo.lock` 记录 workspace 成员版本，导致机器人发布后仓库里 `Cargo.lock` 与两个 `Cargo.toml` 版本不一致——当前不会让 checks 失败（checks 未用 `--locked`/`--frozen`，cargo 只会自动重写 lock），但一旦将来给 CI 加 `--locked` 就会直接变成检查失败。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
