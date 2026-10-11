@@ -393,6 +393,26 @@
 - **PLAN 更新：** 无清单勾选变化（M1 的"检测实际可用的编码器与滤镜能力"仍是已完成状态，本次为该条的深化）；本记录新增。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（M1 深化续）：补齐 AV1 软件编码器并澄清检测口径
+
+- **本次完成：** 用户反馈"ffmpeg 提示支持 av1 编码，为什么没探测到"。核对后确认是**两件事混在一起**，分别处理：
+  1. **确实漏了 3 个软件 AV1 编码器**：`libsvtav1` / `libaom-av1` / `librav1e` 在 `ffmpeg -encoders` 中存在且本机实拍可用，但没进应用目录（此前只有 `av1_nvenc`）。现已补入规格表，编码器总数 12 → **15**。
+  2. **硬件 AV1 的"不支持"是真实结论**，不是检测缺陷：`-encoders` 里列出 `av1_nvenc` 只代表该 FFmpeg 构建编译了它，是否可用取决于显卡编码单元。实拍证据：RTX 4080 Laptop 报 `No capable devices found`（RTX 40 系无 AV1 编码单元，需 RTX 50 系）、Radeon 610M 报 `CreateComponent(AMFVideoEncoderHW_AV1) failed with error 1`、本机 Intel MFX 不可用。
+  3. 新增 `PresetKind`（`Preset` / `CpuUsed` / `Speed` / `QsvPreset` / `AmfQuality`）：三个 AV1 软件编码器的速度档位写法各不相同——SVT-AV1 用 `-preset N`（0–13）、libaom-av1 用 `-deadline good -cpu-used N`（0–8）、librav1e 用 `-speed N`（0–10）；三者恒定质量都补 `-b:v 0`。`-row-mt 1` 现在只加给 libvpx-vp9。
+  4. **错误信息更可读**：`extract_encoder_error` 改为按"原因关键词"打分（`No capable` / `Cannot load` / `CreateComponent` / `Error creating …` 优先），不再被 `Terminating thread with return code` 这类收尾行盖住。现在界面能直接显示「NVIDIA 硬件编码不可用：No capable devices found」。
+  5. WebM 兼容性判断改为按**编码格式**（`codec == vp9 || codec == av1`），因此三个软件 AV1 与三个硬件 AV1 都被正确识别为可入 WebM。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo test --workspace`（**101 单元 + 2 冒烟通过**，新增 `av1_software_encoders_use_their_own_speed_option` 覆盖三种速度选项写法）；`cargo clippy -D warnings`、`cargo fmt --check` 通过。
+  - 实机集成：`cargo test --workspace -- --ignored` **13/13 通过**；`encode_honours_configured_container` 现覆盖 MKV(x264) / MP4(x264) / WebM(VP9+Opus) / **WebM(SVT-AV1+Opus)** 四条真实压制路径，成品经 FFprobe 校验编码格式为 h264 / vp9 / **av1**。
+  - 本机编码器实拍：`libsvtav1` 通过（140ms/5 帧）、`libaom-av1` 通过（630ms/5 帧）、`librav1e` 通过（335ms/5 帧）；`av1_mf` 报 `could not find any MFT for the given media type`，`av1_d3d12va` / `av1_vulkan` / `av1_vaapi` 报 "Impossible to convert between the formats"（需要 hwupload 滤镜链，本应用不做这类硬件帧链路，故未纳入目录）。
+  - 前端：`check`（0 错误）、`lint`、`format:check`、`test`（53 通过，WebM 编码器兼容性用例扩展到 VP9 + 全部 AV1）全部通过。
+- **限制（如实记录）：**
+  - `av1_mf`（Windows Media Foundation）与 `av1_d3d12va` / `av1_vulkan` / `av1_vaapi` 这类需要硬件帧上传（`hwupload`）的编码器**未纳入目录**：它们不能直接吃软件帧，必须配 `-init_hw_device` / `-vf hwupload` 的完整链路，属独立工作量；在没有 Intel/AMD 硬件可实测的机器上也无法验证。
+  - 软件 AV1 速度慢（libaom-av1 尤甚），应用只透传速度档位，不做速度/质量自动推荐。
+  - 硬件 AV1 的实际可用性只能在有对应硬件的机器上验证。
+- **PLAN 更新：** 无清单勾选变化；本记录新增。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱

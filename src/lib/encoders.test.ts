@@ -145,8 +145,16 @@ describe("containerFromPath / containerSupportsEncoder", () => {
   it("only WebM restricts the video encoder", () => {
     expect(containerSupportsEncoder("mkv", "libx264")).toBe(true);
     expect(containerSupportsEncoder("mp4", "libx265")).toBe(true);
+    // WebM 只接受 VP9 / AV1
     expect(containerSupportsEncoder("webm", "libx264")).toBe(false);
+    expect(containerSupportsEncoder("webm", "hevc_nvenc")).toBe(false);
+    expect(containerSupportsEncoder("webm", "libvpx-vp9")).toBe(true);
+    expect(containerSupportsEncoder("webm", "libsvtav1")).toBe(true);
+    expect(containerSupportsEncoder("webm", "libaom-av1")).toBe(true);
+    expect(containerSupportsEncoder("webm", "librav1e")).toBe(true);
     expect(containerSupportsEncoder("webm", "av1_nvenc")).toBe(true);
+    expect(containerSupportsEncoder("webm", "av1_qsv")).toBe(true);
+    expect(containerSupportsEncoder("webm", "av1_amf")).toBe(true);
   });
 
   it("only WebM restricts the audio codec (app copies audio, never transcodes)", () => {

@@ -198,15 +198,29 @@ pub fn probe_encoder_usable(ffmpeg_path: &Path, encoder_id: &str) -> EncoderProb
 
 /// 从 FFmpeg stderr 中提取最能说明问题的一行。
 ///
-/// 硬件编码器失败时，最后一句话往往是
-/// `Nothing was written into output file...` 这类收尾信息，真正的原因
+/// 硬件编码器失败时，最后几行往往是收尾信息
+/// （`Nothing was written into output file...`、
+/// `Terminating thread with return code`），真正的原因
 /// （`No capable devices found` / `Error creating a MFX session` /
-/// `CreateComponent(...) failed`）出现在前面，所以这里优先挑包含错误关键词的
-/// 最后一行。
+/// `CreateComponent(...) failed` / `Cannot load nvcuda.dll`）出现在前面，
+/// 所以这里按"原因关键词"打分，取分数最高、同分时最靠后的一行。
 pub fn extract_encoder_error(stderr: &str) -> String {
-    const NOISE: [&str; 2] = [
+    const NOISE: [&str; 3] = [
         "Nothing was written into output file",
         "at least one of its streams received no packets",
+        "Terminating thread with return code",
+    ];
+    // 从最具体到最笼统：命中越靠前的关键词，说明问题越明确
+    const RANKED: [&str; 9] = [
+        "no capable",
+        "cannot load",
+        "createcomponent",
+        "error creating",
+        "error initializing",
+        "not supported",
+        "invalid argument",
+        "failed",
+        "error",
     ];
     let candidates: Vec<&str> = stderr
         .lines()
@@ -214,23 +228,21 @@ pub fn extract_encoder_error(stderr: &str) -> String {
         .filter(|line| !line.is_empty())
         .filter(|line| !NOISE.iter().any(|noise| line.contains(noise)))
         .collect();
-    const KEYWORDS: [&str; 7] = [
-        "no capable",
-        "error",
-        "failed",
-        "not supported",
-        "cannot",
-        "unable",
-        "invalid",
-    ];
+
     let best = candidates
         .iter()
-        .rev()
-        .find(|line| {
+        .enumerate()
+        .filter_map(|(index, line)| {
             let lower = line.to_ascii_lowercase();
-            KEYWORDS.iter().any(|keyword| lower.contains(keyword))
+            RANKED
+                .iter()
+                .position(|keyword| lower.contains(keyword))
+                .map(|rank| (RANKED.len() - rank, index, *line))
         })
-        .or_else(|| candidates.last());
+        .max_by_key(|(score, index, _)| (*score, *index))
+        .map(|(_, _, line)| line)
+        .or_else(|| candidates.last().copied());
+
     match best {
         Some(line) => line.chars().take(200).collect(),
         None => "编码器返回非零退出码（FFmpeg 未输出更多信息）".to_string(),
@@ -650,6 +662,23 @@ mod tests {
             "[out#0/null @ 0x1] Nothing was written into output file, because at least one of its streams received no packets.\n"
         )
         .contains("未输出更多信息"));
+
+        // 只有"线程终止"这类收尾行时，也应给出兜底文案而不是误导性信息
+        assert!(extract_encoder_error(
+            "[vost#0:0/h264_qsv @ 0x1] Terminating thread with return code -22 (Invalid argument)\n"
+        )
+        .contains("未输出更多信息"));
+
+        // 真实输出：具体原因 + 收尾噪声混在一起，必须挑出具体原因
+        let stderr = "[av1_nvenc @ 0x1] Cannot load nvcuda.dll.\n\
+                      [av1_nvenc @ 0x1] No capable devices found\n\
+                      [vost#0:0/av1_nvenc @ 0x2] Terminating thread with return code -22 (Invalid argument)\n\
+                      [out#0/null @ 0x3] Nothing was written into output file, because at least one of its streams received no packets.\n";
+        let message = extract_encoder_error(stderr);
+        assert!(
+            message.contains("No capable devices found"),
+            "message: {message}"
+        );
     }
 
     /// 实机验证：仅在显式 `--ignored` 时运行，要求本机 PATH 中已安装 ffmpeg。

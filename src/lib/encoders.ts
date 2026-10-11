@@ -63,6 +63,12 @@ const QSV_PRESETS = [
 const AMF_PRESETS = ["speed", "balanced", "quality"] as const;
 /** libvpx-vp9 的 `-cpu-used` 档位（越小越慢越好）。 */
 const VP9_PRESETS = ["0", "1", "2", "3", "4", "5"] as const;
+/** libaom-av1 的 `-cpu-used` 档位。 */
+const AOM_PRESETS = ["0", "1", "2", "3", "4", "5", "6", "7", "8"] as const;
+/** SVT-AV1 的 `-preset`（数字越小越慢越好）。 */
+const SVTAV1_PRESETS = ["0", "2", "4", "6", "8", "10", "12", "13"] as const;
+/** librav1e 的 `-speed` 档位。 */
+const RAV1E_PRESETS = ["0", "2", "4", "5", "6", "8", "10"] as const;
 
 const AUTO_PIXEL_FORMAT: PixelFormatOption = { value: null, label: "自动" };
 const PIXEL_8BIT: PixelFormatOption = {
@@ -134,6 +140,54 @@ export const ENCODER_DEFINITIONS: EncoderDefinition[] = [
     pixelFormats: [AUTO_PIXEL_FORMAT, PIXEL_8BIT],
     defaultPixelFormat: null,
     capabilityKey: "libvpx-vp9",
+  },
+  {
+    id: "libsvtav1",
+    label: "AV1（libsvtav1，软件）",
+    family: "software",
+    vendor: "software",
+    codec: "av1",
+    qualityMode: "crf",
+    qualityLabel: "CRF",
+    qualityRange: [0, 63],
+    defaultQuality: 35,
+    presets: [...SVTAV1_PRESETS],
+    defaultPreset: "8",
+    pixelFormats: [AUTO_PIXEL_FORMAT, PIXEL_8BIT, PIXEL_10BIT_YUV420P10LE],
+    defaultPixelFormat: null,
+    capabilityKey: "libsvtav1",
+  },
+  {
+    id: "libaom-av1",
+    label: "AV1（libaom-av1，软件）",
+    family: "software",
+    vendor: "software",
+    codec: "av1",
+    qualityMode: "crf",
+    qualityLabel: "CRF",
+    qualityRange: [0, 63],
+    defaultQuality: 32,
+    presets: [...AOM_PRESETS],
+    defaultPreset: "6",
+    pixelFormats: [AUTO_PIXEL_FORMAT, PIXEL_8BIT, PIXEL_10BIT_YUV420P10LE],
+    defaultPixelFormat: null,
+    capabilityKey: "libaom-av1",
+  },
+  {
+    id: "librav1e",
+    label: "AV1（librav1e，软件）",
+    family: "software",
+    vendor: "software",
+    codec: "av1",
+    qualityMode: "crf",
+    qualityLabel: "CRF",
+    qualityRange: [0, 63],
+    defaultQuality: 32,
+    presets: [...RAV1E_PRESETS],
+    defaultPreset: "6",
+    pixelFormats: [AUTO_PIXEL_FORMAT, PIXEL_8BIT, PIXEL_10BIT_YUV420P10LE],
+    defaultPixelFormat: null,
+    capabilityKey: "librav1e",
   },
   {
     id: "h264_nvenc",
@@ -486,7 +540,13 @@ export function containerSupportsAudioCodec(
   return codec === "opus" || codec === "vorbis";
 }
 
-/** 容器是否承载得了当前视频编码器（判断依据：容器的标准编码集合）。 */
+/**
+ * 容器是否承载得了该视频编码器（判断依据：编码格式 + 容器的标准编码集合）。
+ *
+ * WebM 只接受 VP8 / VP9 / AV1，其中 VP8 本应用未提供，因此实际可用的是
+ * VP9（libvpx-vp9）与全部 AV1 编码器（软件 libsvtav1 / libaom-av1 / librav1e
+ * 与硬件 av1_nvenc / av1_qsv / av1_amf）。
+ */
 export function containerSupportsEncoder(
   container: Container,
   encoderId: string,
@@ -494,6 +554,6 @@ export function containerSupportsEncoder(
   if (container !== "webm") {
     return true;
   }
-  // WebM 只接受 VP8 / VP9 / AV1；本应用当前编码器集合里只有 AV1 可用。
-  return encoderId.includes("av1") || encoderId.startsWith("libvpx");
+  const def = encoderDefinition(encoderId);
+  return def?.codec === "vp9" || def?.codec === "av1";
 }

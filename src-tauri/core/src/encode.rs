@@ -225,6 +225,21 @@ impl EncoderVendor {
     }
 }
 
+/// 视频质量/速度参数写法：不同编码器用不同的选项名。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresetKind {
+    /// `-preset`（libx264 / libx265 / NVENC 的 p1–p7 / SVT-AV1 的 0–13）
+    Preset,
+    /// `-deadline good -cpu-used N`（libvpx-vp9、libaom-av1）
+    CpuUsed,
+    /// `-speed N`（librav1e）
+    Speed,
+    /// Intel QSV 的 `-preset` 名称
+    QsvPreset,
+    /// AMD AMF 的 `-quality` 档位
+    AmfQuality,
+}
+
 /// 单个编码器的静态规格：预设、质量范围、像素格式等（与能力检测无关的固有属性）。
 #[derive(Debug, Clone)]
 pub struct EncoderSpec {
@@ -237,7 +252,9 @@ pub struct EncoderSpec {
     pub family: EncoderFamily,
     /// 输出视频编码格式（H.264 / HEVC / AV1 / VP9），用于容器兼容性提示。
     pub codec: &'static str,
-    /// UI 中质量参数的名称（CRF / CQ / ICQ）。
+    /// 速度/质量预设的选项写法。
+    pub preset_kind: PresetKind,
+    /// UI 中质量参数的名称（CRF / CQ / ICQ / QP）。
     pub quality_label: &'static str,
     /// 可用预设列表。
     pub presets: &'static [&'static str],
@@ -249,7 +266,8 @@ pub struct EncoderSpec {
     pub default_quality: u32,
     /// 支持的像素格式列表；`None` 条目代表"自动"。
     pub pixel_formats: &'static [Option<&'static str>],
-    /// 恒定质量是否需要显式 `-b:v 0`（libvpx-vp9 不加会退化为 VBR，CRF 失效）。
+    /// 恒定质量是否需要显式 `-b:v 0`（libvpx-vp9 / libaom-av1 / libsvtav1
+    /// 不加会退化为受限 VBR，`-crf` 的表现不符合预期）。
     pub zero_bitrate: bool,
 }
 
@@ -286,6 +304,12 @@ pub const QSV_PRESETS: &[&str] = &[
 pub const AMF_PRESETS: &[&str] = &["speed", "balanced", "quality"];
 /// libvpx-vp9 的速度档位（`-cpu-used`，越小越慢越好）。
 pub const VP9_PRESETS: &[&str] = &["0", "1", "2", "3", "4", "5"];
+/// libaom-av1 的速度档位（`-cpu-used`，0 最慢最好、8 最快）。
+pub const AOM_PRESETS: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8"];
+/// SVT-AV1 预设（`-preset`，数字越小越慢越好；0–13）。
+pub const SVTAV1_PRESETS: &[&str] = &["0", "2", "4", "6", "8", "10", "12", "13"];
+/// librav1e 速度档位（`-speed`，0 最慢最好、10 最快）。
+pub const RAV1E_PRESETS: &[&str] = &["0", "2", "4", "5", "6", "8", "10"];
 
 /// 编码器规格表。**这是"应用支持的编码器集合"，是否真正可用由能力检测决定**
 /// （见 `crate::capabilities`：先用 `ffmpeg -encoders` 判断是否编译进来，
@@ -293,6 +317,7 @@ pub const VP9_PRESETS: &[&str] = &["0", "1", "2", "3", "4", "5"];
 pub static ENCODER_SPECS: &[EncoderSpec] = &[
     EncoderSpec {
         encoder_id: "libx264",
+        preset_kind: PresetKind::Preset,
         label: "H.264（libx264，软件）",
         vendor: EncoderVendor::Software,
         family: EncoderFamily::Software,
@@ -308,6 +333,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "libx265",
+        preset_kind: PresetKind::Preset,
         label: "HEVC（libx265，软件）",
         vendor: EncoderVendor::Software,
         family: EncoderFamily::Software,
@@ -322,6 +348,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "libvpx-vp9",
+        preset_kind: PresetKind::CpuUsed,
         label: "VP9（libvpx-vp9，软件）",
         vendor: EncoderVendor::Software,
         family: EncoderFamily::Software,
@@ -336,7 +363,54 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
         zero_bitrate: true,
     },
     EncoderSpec {
+        encoder_id: "libsvtav1",
+        preset_kind: PresetKind::Preset,
+        label: "AV1（libsvtav1，软件）",
+        vendor: EncoderVendor::Software,
+        family: EncoderFamily::Software,
+        codec: "av1",
+        quality_label: "CRF",
+        presets: SVTAV1_PRESETS,
+        default_preset: "8",
+        quality_range: (0, 63),
+        default_quality: 35,
+        pixel_formats: &[None, Some("yuv420p"), Some("yuv420p10le")],
+        // 恒定质量需要显式 -b:v 0（否则退化为受限 VBR）
+        zero_bitrate: true,
+    },
+    EncoderSpec {
+        encoder_id: "libaom-av1",
+        preset_kind: PresetKind::CpuUsed,
+        label: "AV1（libaom-av1，软件）",
+        vendor: EncoderVendor::Software,
+        family: EncoderFamily::Software,
+        codec: "av1",
+        quality_label: "CRF",
+        presets: AOM_PRESETS,
+        default_preset: "6",
+        quality_range: (0, 63),
+        default_quality: 32,
+        pixel_formats: &[None, Some("yuv420p"), Some("yuv420p10le")],
+        zero_bitrate: true,
+    },
+    EncoderSpec {
+        encoder_id: "librav1e",
+        preset_kind: PresetKind::Speed,
+        label: "AV1（librav1e，软件）",
+        vendor: EncoderVendor::Software,
+        family: EncoderFamily::Software,
+        codec: "av1",
+        quality_label: "CRF",
+        presets: RAV1E_PRESETS,
+        default_preset: "6",
+        quality_range: (0, 63),
+        default_quality: 32,
+        pixel_formats: &[None, Some("yuv420p"), Some("yuv420p10le")],
+        zero_bitrate: true,
+    },
+    EncoderSpec {
         encoder_id: "h264_nvenc",
+        preset_kind: PresetKind::Preset,
         label: "H.264（h264_nvenc，NVIDIA）",
         vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
@@ -351,6 +425,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "hevc_nvenc",
+        preset_kind: PresetKind::Preset,
         label: "HEVC（hevc_nvenc，NVIDIA）",
         vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
@@ -365,6 +440,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "av1_nvenc",
+        preset_kind: PresetKind::Preset,
         label: "AV1（av1_nvenc，NVIDIA）",
         vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
@@ -380,6 +456,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "h264_qsv",
+        preset_kind: PresetKind::QsvPreset,
         label: "H.264（h264_qsv，Intel Quick Sync）",
         vendor: EncoderVendor::Intel,
         family: EncoderFamily::Qsv,
@@ -394,6 +471,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "hevc_qsv",
+        preset_kind: PresetKind::QsvPreset,
         label: "HEVC（hevc_qsv，Intel Quick Sync）",
         vendor: EncoderVendor::Intel,
         family: EncoderFamily::Qsv,
@@ -408,6 +486,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "av1_qsv",
+        preset_kind: PresetKind::QsvPreset,
         label: "AV1（av1_qsv，Intel Quick Sync）",
         vendor: EncoderVendor::Intel,
         family: EncoderFamily::Qsv,
@@ -422,6 +501,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "h264_amf",
+        preset_kind: PresetKind::AmfQuality,
         label: "H.264（h264_amf，AMD）",
         vendor: EncoderVendor::Amd,
         family: EncoderFamily::Amf,
@@ -436,6 +516,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "hevc_amf",
+        preset_kind: PresetKind::AmfQuality,
         label: "HEVC（hevc_amf，AMD）",
         vendor: EncoderVendor::Amd,
         family: EncoderFamily::Amf,
@@ -450,6 +531,7 @@ pub static ENCODER_SPECS: &[EncoderSpec] = &[
     },
     EncoderSpec {
         encoder_id: "av1_amf",
+        preset_kind: PresetKind::AmfQuality,
         label: "AV1（av1_amf，AMD）",
         vendor: EncoderVendor::Amd,
         family: EncoderFamily::Amf,

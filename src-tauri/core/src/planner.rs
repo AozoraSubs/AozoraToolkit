@@ -85,12 +85,14 @@ fn push(args: &mut Vec<OsString>, value: impl Into<OsString>) {
     args.push(value.into());
 }
 
-/// 按编码器家族生成视频质量参数（预设 + 质量控制）。
+/// 按编码器家族生成视频质量参数（速度/质量预设 + 质量控制）。
 ///
 /// 各家族的实际选项名不同，且都以"实际可用的 FFmpeg 构建"为准：
 /// - 软件（libx264 / libx265）：`-preset <x264 预设> -crf N`；
-/// - 软件（libvpx-vp9）：`-deadline good -cpu-used N -crf N -b:v 0`
-///   ——VP9 的恒定质量必须显式 `-b:v 0`，否则会退化为受限 VBR；
+/// - 软件（libvpx-vp9 / libaom-av1）：`-deadline good -cpu-used N -crf N -b:v 0`
+///   ——恒定质量必须显式 `-b:v 0`，否则会退化为受限 VBR；
+/// - 软件（libsvtav1）：`-preset N -crf N -b:v 0`；
+/// - 软件（librav1e）：`-speed N -crf N -b:v 0`；
 /// - NVENC：`-preset p1…p7 -rc vbr -cq N`（`-cq` 标尺 0–51 / AV1 为 0–63）；
 /// - Intel QSV：`-preset <名称> -global_quality N`（ICQ 模式）；
 /// - AMD AMF：`-quality <speed|balanced|quality> -rc cqp -qp_i N -qp_p N`。
@@ -99,26 +101,44 @@ fn push_video_quality_args(
     spec: &encode::EncoderSpec,
     video: &encode::VideoConfig,
 ) -> Result<(), String> {
+    use encode::PresetKind;
+
     let value = video.quality_value.to_string();
+    // libvpx-vp9 / libaom-av1 的 cpu-used 越小越慢越好（档次已按字符串给出）
+    let speed_value = video.preset.as_str();
     match (spec.family, video.quality_mode) {
-        (EncoderFamily::Software, QualityMode::Crf) if spec.zero_bitrate => {
-            // libvpx-vp9：cpu-used 越小越慢越好（档次已按字符串给出）
-            push(args, "-deadline");
-            push(args, "good");
-            push(args, "-cpu-used");
-            push(args, &video.preset);
-            push(args, "-row-mt");
-            push(args, "1");
-            push(args, "-crf");
-            push(args, value);
-            push(args, "-b:v");
-            push(args, "0");
-        }
         (EncoderFamily::Software, QualityMode::Crf) => {
-            push(args, "-preset");
-            push(args, &video.preset);
-            push(args, "-crf");
-            push(args, value);
+            match spec.preset_kind {
+                PresetKind::CpuUsed => {
+                    push(args, "-deadline");
+                    push(args, "good");
+                    push(args, "-cpu-used");
+                    push(args, speed_value);
+                }
+                PresetKind::Speed => {
+                    push(args, "-speed");
+                    push(args, speed_value);
+                }
+                // libx264 / libx265 / libsvtav1：统一用 -preset
+                PresetKind::Preset | PresetKind::QsvPreset | PresetKind::AmfQuality => {
+                    push(args, "-preset");
+                    push(args, speed_value);
+                }
+            }
+            if spec.zero_bitrate {
+                // libvpx-vp9 额外开启行级多线程（纯性能选项，不影响画质）
+                if spec.encoder_id == "libvpx-vp9" {
+                    push(args, "-row-mt");
+                    push(args, "1");
+                }
+                push(args, "-crf");
+                push(args, value);
+                push(args, "-b:v");
+                push(args, "0");
+            } else {
+                push(args, "-crf");
+                push(args, value);
+            }
         }
         (EncoderFamily::Nvenc, QualityMode::Cq) => {
             push(args, "-preset");
@@ -621,6 +641,51 @@ mod tests {
             joined.contains("-c:v h264_amf -quality balanced -rc cqp -qp_i 24 -qp_p 24"),
             "args: {joined}"
         );
+    }
+
+    #[test]
+    fn av1_software_encoders_use_their_own_speed_option() {
+        // libsvtav1：-preset N（数字档位）
+        let mut config = x264_config(35, "8");
+        config.video.encoder_id = "libsvtav1".into();
+        let joined =
+            join_args(&build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        assert!(
+            joined.contains("-c:v libsvtav1 -preset 8 -crf 35 -b:v 0"),
+            "args: {joined}"
+        );
+
+        // libaom-av1：-deadline good -cpu-used N
+        let mut config = x264_config(32, "6");
+        config.video.encoder_id = "libaom-av1".into();
+        let joined =
+            join_args(&build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        assert!(
+            joined.contains("-c:v libaom-av1 -deadline good -cpu-used 6 -crf 32 -b:v 0"),
+            "args: {joined}"
+        );
+        assert!(
+            !joined.contains("-row-mt"),
+            "row-mt 只用于 libvpx-vp9：{joined}"
+        );
+
+        // librav1e：-speed N
+        let mut config = x264_config(32, "6");
+        config.video.encoder_id = "librav1e".into();
+        let joined =
+            join_args(&build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap());
+        assert!(
+            joined.contains("-c:v librav1e -speed 6 -crf 32 -b:v 0"),
+            "args: {joined}"
+        );
+    }
+
+    /// 参数数组转成一行文本，便于断言。
+    fn join_args(args: &[OsString]) -> String {
+        args.iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]

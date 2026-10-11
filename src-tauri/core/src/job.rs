@@ -653,15 +653,18 @@ mod tests {
             String::from_utf8_lossy(&remux.stderr)
         );
 
-        // (容器, 扩展名, 编码器, 预设, 质量, 输入)
+        // (容器, 扩展名, 编码器, 预设, 质量, 使用 Opus 输入)
         let cases = [
-            (Container::Mkv, "mkv", "libx264", "veryfast", 23, &input),
-            (Container::Mp4, "mp4", "libx264", "veryfast", 23, &input),
+            (Container::Mkv, "mkv", "libx264", "veryfast", 23, false),
+            (Container::Mp4, "mp4", "libx264", "veryfast", 23, false),
             // VP9 恒定质量需要 -b:v 0（planner 会补上），WebM 不接受 H.264
-            (Container::Webm, "webm", "libvpx-vp9", "4", 40, &webm_input),
+            (Container::Webm, "webm", "libvpx-vp9", "4", 40, true),
+            // 软件 AV1：SVT-AV1 速度档位走 -preset，同样进 WebM
+            (Container::Webm, "webm", "libsvtav1", "12", 45, true),
         ];
-        for (container, ext, encoder, preset, quality, source) in cases {
-            let output = dir.join(format!("out-{ext}.{ext}"));
+        for (container, ext, encoder, preset, quality, needs_opus) in cases {
+            let source = if needs_opus { &webm_input } else { &input };
+            let output = dir.join(format!("out-{encoder}.{ext}"));
             let mut config = config_for(encoder, preset, quality);
             config.output.container = container;
             config.output.path = output.clone();
@@ -697,10 +700,10 @@ mod tests {
             assert_eq!(info.video_streams.len(), 1, "{ext} 视频流数量不符");
             assert_eq!(info.audio_streams.len(), 1, "{ext} 音频流数量不符");
             let codec = &info.video_streams[0].codec_name;
-            let expected_codec = if encoder == "libvpx-vp9" {
-                "vp9"
-            } else {
-                "h264"
+            let expected_codec = match encoder {
+                "libvpx-vp9" => "vp9",
+                "libsvtav1" => "av1",
+                _ => "h264",
             };
             assert_eq!(codec, expected_codec, "{ext} 视频编码不符");
             assert!(!temp.exists(), "{ext} 临时文件未清理");
