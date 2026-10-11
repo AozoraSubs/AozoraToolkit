@@ -1,2 +1,5 @@
-* text=auto
+# 统一以 LF 检出：prettier 3 的默认 endOfLine 是 lf，而 Windows runner 的 git
+# core.autocrlf=true 若配合 text=auto 会把工作区整棵写成 CRLF，使 format:check
+# 把每个文件都判为“未格式化”（只会在 windows-2022 上失败）。
+* text=auto eol=lf
 *.md whitespace=-blank-at-eol

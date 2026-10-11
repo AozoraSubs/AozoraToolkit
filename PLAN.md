@@ -480,6 +480,17 @@
 - **限制：** 本机无法执行 GitHub Actions；`shell: bash` 在 Windows runner 上的 PATH 可用性（cargo / pnpm）与首次真实运行仍需推送后确认——本仓库既有的 Windows `shell: bash` 步骤（快照产物重命名）已连续成功，风险低。
 - **剩余工作（按用户要求另开任务）：** 发布流程的版本提交未同步 `src-tauri/Cargo.lock`（`git add` 列表与 `tools/update-version.mjs` 都不含它），而 `Cargo.lock` 记录 workspace 成员版本，导致机器人发布后仓库里 `Cargo.lock` 与两个 `Cargo.toml` 版本不一致——当前不会让 checks 失败（checks 未用 `--locked`/`--frozen`，cargo 只会自动重写 lock），但一旦将来给 CI 加 `--locked` 就会直接变成检查失败。
 
+### 2026-10-11（CI 修复四）：windows-2022 的 format:check 因换行符全量失败
+
+- **现象：** 推送后 `checks` 只有 **windows-2022** 失败，且 `prettier --check .` 报**全部 47 个**可检查文件未格式化——包含 `.prettierrc`、`tsconfig.json`、`index.html` 等从未改动、内容本身也没有问题的文件；macOS 与 ubuntu 通过。
+- **根因：** prettier 3 的默认 `endOfLine` 是 `lf`（2.x 才是 `auto`），而 `.gitattributes` 只写了 `* text=auto`——该写法**允许工作区使用平台原生换行符**。Windows runner 上 Git for Windows 的系统配置默认 `core.autocrlf=true`，两者叠加会把所有文本文件检出为 **CRLF**，于是每个文件都被判为“未格式化”；macOS / Linux runner 的 `core.eol` 原生即 LF，所以只有 Windows 失败。日志“全部文件一起不合格”正是全局属性问题的特征。
+- **复现与对照（真实仓库文件的隔离克隆，`core.autocrlf=true` + 全新检出）：** 现状配置 → `i/lf w/crlf`（index.html 含 13 个 CRLF），prettier 默认把 3/3 探针文件判为不合格；`.gitattributes` 改为 `* text=auto eol=lf` 后 → `i/lf w/lf`（CRLF 0 个），全部通过。另验证 `.prettierrc` 加 `"endOfLine": "auto"` 亦可通过（备选修法，见下）。
+- **本次完成：** `.gitattributes` 首行改为 `* text=auto eol=lf` 并注明原因。仓库内 blob 本就是 LF，因此不改变任何文件内容，只固定检出行为；本地既有的 CRLF 工作文件仍被 git 视为干净（比较时按属性归一化），实测 `git status` 仅显示 `.gitattributes` 一项改动。
+- **验证方式与结果：** 本地 `pnpm run format:check` 通过；模拟 Windows runner 的克隆（`core.autocrlf=true`、删除文件后重新检出）得到 `w/lf`、index.html CRLF 为 0，并在该克隆内运行 `pnpm run format:check` 通过；`git diff --check` 无问题。
+- **限制：** 无法解释此前几次 windows-2022 的 checks 为何成功——job 日志接口未授权返回 403，拿不到那几次的检出实况，疑为 GitHub runner 镜像或 git 配置的滚动更新；但该机制是确定性的，修复与触发原因无关。
+- **备选修法（未采用）：** `.prettierrc` 增加 `"endOfLine": "auto"`，让检查容忍检出时的 CRLF。若日后本地编辑器经常写 CRLF 造成困扰，可改用它替代或叠加。
+- **剩余工作：** 推送后重跑 `checks`，确认三平台全绿。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
