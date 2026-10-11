@@ -272,7 +272,7 @@ describe("能力检测驱动的编码器可用性", () => {
     warnings: [],
   };
 
-  it("truste the backend result instead of a hardcoded list", () => {
+  it("trusts the backend result instead of a hardcoded list", () => {
     expect(encoderUsable(report, "libx264")).toBe(true);
     // 编译进来了但没有对应硬件 → 不可用
     expect(encoderUsable(report, "hevc_nvenc")).toBe(false);
