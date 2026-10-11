@@ -97,12 +97,21 @@ describe("分辨率设置", () => {
 
   it("提供常见分辨率档位，含保持源分辨率", () => {
     expect(RESOLUTION_PRESETS[0].resolution).toBeNull();
-    expect(RESOLUTION_PRESETS.map((option) => option.label)).toContain(
-      "1080p（1920×1080）",
-    );
+    const labels = RESOLUTION_PRESETS.map((option) => option.label);
+    expect(labels).toContain("4K（3840×2160）");
+    expect(labels).toContain("1080p（1920×1080）");
+    expect(labels).toContain("720p（1280×720）");
+    expect(labels).toContain("480p（854×480）");
     for (const option of RESOLUTION_PRESETS.slice(1)) {
       expect(validateResolution(option.resolution)).toBeNull();
     }
+    // 4K 档位是 3840×2160，且在允许范围内（上限 8192），取偶后不变
+    const fourK = RESOLUTION_PRESETS.find((option) =>
+      option.label.startsWith("4K"),
+    );
+    expect(fourK?.resolution).toEqual({ width: 3840, height: 2160 });
+    expect(evenDimension(3840)).toBe(3840);
+    expect(evenDimension(2160)).toBe(2160);
   });
 });
 

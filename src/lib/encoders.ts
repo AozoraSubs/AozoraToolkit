@@ -426,6 +426,7 @@ export const RESOLUTION_PRESETS: ReadonlyArray<{
   resolution: Resolution | null;
 }> = [
   { label: "源分辨率", resolution: null },
+  { label: "4K（3840×2160）", resolution: { width: 3840, height: 2160 } },
   { label: "1080p（1920×1080）", resolution: { width: 1920, height: 1080 } },
   { label: "720p（1280×720）", resolution: { width: 1280, height: 720 } },
   { label: "480p（854×480）", resolution: { width: 854, height: 480 } },
