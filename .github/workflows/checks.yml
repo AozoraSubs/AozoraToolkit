@@ -1,13 +1,22 @@
 name: checks
 
-# 每次推送 / PR 的独立检查工作流：三平台运行前端检查与 cargo fmt/clippy/test，
-# 不执行打包。发布 / 周快照工作流在构建前校验本工作流的运行结果。
+# 三平台检查工作流：运行前端检查与 cargo fmt/clippy/test，不执行打包。
+# 触发方式：推送 / PR / 手动，以及被 build.yml 通过 workflow_call 复用
+# （发布流程推送版本提交用的是 GITHUB_TOKEN，这类推送不会触发 push 运行，
+#  因此构建工作流会自己调用本工作流，而不是去查运行记录）。
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "要检查的 Git 引用；留空使用触发提交"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -24,6 +33,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: 安装 Linux 系统依赖（WebKitGTK 等）
         if: runner.os == 'Linux'

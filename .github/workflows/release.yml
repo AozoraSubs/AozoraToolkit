@@ -86,21 +86,25 @@ jobs:
       - name: 提交版本更新
         id: commit
         if: steps.check.outputs.skip_release == 'false'
+        env:
+          # 通过 env 传入，避免把 workflow_dispatch 输入直接拼进脚本
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
         run: |
+          # 版本号统一去掉 v 前缀（AGENTS.md §3.2 的三段式语义化版本）
+          VERSION="${RELEASE_VERSION#v}"
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
           git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/core/Cargo.toml CHANGELOG.md
-          git commit -m "chore: update version to ${{ github.event.inputs.version }}" || echo "No changes to commit"
+          git commit -m "build: 版本号升级至 ${VERSION}" || echo "No changes to commit"
           git push
           echo "new_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-  # 第二步：对版本更新后的提交做三平台构建与检查
+  # 第二步：对版本更新后的提交做三平台构建（build.yml 在打包前自行运行 checks）
   build:
     needs: bump-version
     if: needs.bump-version.outputs.skip_release == 'false'
     permissions:
       contents: read
-      actions: write
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ needs.bump-version.outputs.new_sha }}

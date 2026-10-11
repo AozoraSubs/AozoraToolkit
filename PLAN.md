@@ -451,6 +451,15 @@
 - **PLAN 更新：** 无清单勾选变化；本记录新增。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-11（CI 修复）：Create Release 版本提交缺少检查记录导致构建卡死
+
+- **问题：** 手动运行 Create Release 时，`bump-version` 用 `actions/checkout` 的默认凭据（`GITHUB_TOKEN`）推送版本提交；GitHub 规定这类推送不会创建新的工作流运行，因此 `checks` 永远不会在版本提交上运行。`build.yml` 原有的「确认提交已通过检查」去查询 `head_sha=<版本提交>&event=push` 的 checks 运行记录，永远查不到，轮询 30 × 30 秒后报「等待检查结果超时（15 分钟），拒绝构建」——三个平台都卡在该步骤、构建完全没有开始。同一根因还会影响发布成功之后的周快照（main HEAD 变成机器人提交，同样没有检查记录）。
+- **证据（GitHub API 实查）：** Create Release #3（2026-10-10 12:51，ref `bcf1343`）的 `bump-version` 成功并推送 `1c644eb chore: update version to 0.3.0`；查询该 SHA 的全部工作流运行结果为 **0 条**（父提交 `bcf1343` 有 `checks` push success）；三个 build 作业均停在「确认提交已通过检查」直至被取消；仓库只有周快照 tag（26w41a ~ 26w41d），没有任何正式版 tag。
+- **本次完成（按用户确认的方案）：** 把检查移进构建工作流，不再依赖 push 触发的运行记录。① `checks.yml` 新增 `workflow_call` 触发器与可选 `ref` 输入，checkout 改为 `ref: ${{ inputs.ref || github.sha }}`；② `build.yml` 新增 `checks` 作业复用 `checks.yml`（`with: ref: ${{ inputs.ref || github.sha }}`，与自身构建的提交完全一致），`build` 作业 `needs: checks`，删除原 30 行 API 轮询步骤与不再需要的 `actions: write` 权限（共用 `contents: read`）；③ `release.yml` 构建作业权限同步收回为 `contents: read`，版本提交信息按 AGENTS.md §3.2 由 `chore: update version to X` 改为 `build: 版本号升级至 X`（并去掉输入中的 `v` 前缀）；④ 同步更新 AGENTS.md §3 的 CI 描述；⑤ `weekly-snapshot.yml` 构建作业同步收回不再需要的 `actions: write`（其余无需改动，其隐患随 ② 一并消除）。
+- **验证方式与结果：** 四个工作流文件的 YAML 语法、`uses` / `needs` 依赖与提交引用已本地解析核对（另见 `pnpm run format:check` 结果）；本机无法执行 GitHub Actions，**真实三平台结果需推送后手动触发一次 Create Release 确认**。
+- **PLAN 更新：** 无清单勾选变化；本记录新增。
+- **剩余工作：** 推送后在 Actions 手动运行一次 Create Release 验证；注意 `release.yml` → `build.yml` → `checks.yml` 为三层可复用工作流调用（GitHub 上限为四层），首跑需确认该嵌套调用被接受。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱

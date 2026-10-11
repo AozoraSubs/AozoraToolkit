@@ -1,8 +1,9 @@
 name: build
 
 # 纯构建工作流：仅由发布 / 周快照工作流通过 workflow_call 复用。
-# 构建前先校验目标提交最近一次 checks 工作流运行已通过；
-# 未通过或未运行则直接报错，不重复执行检查。
+# 打包前先在目标提交上运行同一套三平台检查（直接复用 checks.yml），检查通过才打包。
+# 这里不查"最近一次 checks 运行记录"：发布流程推送版本提交用的是 GITHUB_TOKEN，
+# 这类推送不会创建新的工作流运行，去查记录只会等到超时。
 on:
   workflow_call:
     inputs:
@@ -24,10 +25,16 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
+  # 打包前检查：复用 checks.yml，对与构建完全相同的提交运行三平台检查
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+
   build:
+    needs: checks
     strategy:
       fail-fast: false
       matrix:
@@ -46,40 +53,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.sha }}
-
-      - name: 确认提交已通过检查
-        if: inputs.build_bundles == true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHA="${{ inputs.ref || github.sha }}"
-          echo "校验提交 $SHA 最近一次 checks 工作流运行结果..."
-
-          # 轮询等待（最多 15 分钟）：发布流程刚推送的版本提交，其检查可能仍在进行
-          for i in $(seq 1 30); do
-            RESULT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA&event=push&per_page=30" \
-              --jq '([.workflow_runs[] | select(.name == "checks")][0] // {}).conclusion // empty')
-
-            if [ "$RESULT" = "success" ]; then
-              echo "检查已通过，开始构建"
-              exit 0
-            fi
-
-            case "$RESULT" in
-              in_progress|queued|pending|waiting|requested|"")
-                echo "检查尚未完成（${RESULT:-未找到运行记录}），30 秒后重试（$i/30）"
-                sleep 30
-                ;;
-              *)
-                echo "提交 $SHA 的检查结果为 $RESULT，拒绝构建"
-                exit 1
-                ;;
-            esac
-          done
-
-          echo "等待检查结果超时（15 分钟），拒绝构建"
-          exit 1
 
       - name: 安装 Linux 系统依赖（WebKitGTK 等）
         if: runner.os == 'Linux'

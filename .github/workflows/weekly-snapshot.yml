@@ -71,12 +71,12 @@ jobs:
           fi
 
   # 第二步：三平台构建；快照版本号临时注入二进制并标记产物文件名，不产生提交
+  # （build.yml 会在打包前自行对同一提交运行 checks，无需在此校验运行记录）
   build:
     needs: snapshot-version
     if: needs.snapshot-version.outputs.skip_release == 'false'
     permissions:
       contents: read
-      actions: write
     uses: ./.github/workflows/build.yml
     with:
       build_bundles: true
