@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       base_tag:
-        description: "基础标签 (可选，默认为上一个标签)"
+        description: "基础标签 (可选，默认为上一个正式 Release；周快照不算)"
         required: false
         type: string
 
@@ -21,6 +21,7 @@ jobs:
     outputs:
       new_sha: ${{ steps.commit.outputs.new_sha }}
       skip_release: ${{ steps.check.outputs.skip_release }}
+      base_tag: ${{ steps.check.outputs.base_tag }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
@@ -32,26 +33,40 @@ jobs:
         with:
           node-version: "20"
 
-      - name: 获取基础标签并检查提交
+      - name: 解析基础标签并检查提交
         id: check
+        env:
+          # 手动指定的基础标签通过 env 传入，避免把 workflow_dispatch 输入拼进脚本
+          BASE_TAG_INPUT: ${{ github.event.inputs.base_tag }}
         run: |
-          # 如果手动指定了基础标签，使用手动指定的
-          if [ -n "${{ github.event.inputs.base_tag }}" ]; then
-            BASE_TAG="${{ github.event.inputs.base_tag }}"
+          # Changelog 的基准固定为「上一个正式 Release」：releases/latest 只返回
+          # 非 prerelease / 非 draft 的发布，因此周快照（prerelease）永远不会被选为基准。
+          if [ -n "$BASE_TAG_INPUT" ]; then
+            BASE_TAG="$BASE_TAG_INPUT"
+            echo "使用手动指定的基础标签: $BASE_TAG"
           else
-            # 获取最新的正式 release（通过 GitHub API），如果失败则使用最新标签
-            BASE_TAG=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
-              | jq -r '.tag_name' 2>/dev/null)
+            HTTP_CODE=$(curl -s -o /tmp/latest-release.json -w "%{http_code}" \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest")
 
-            # 如果还是没有标签，设置为空字符串
-            if [ "$BASE_TAG" = "null" ]; then
+            if [ "$HTTP_CODE" = "404" ]; then
               BASE_TAG=""
+              echo "仓库还没有正式 Release：Changelog 覆盖全部历史（--all）"
+            elif [ "$HTTP_CODE" = "200" ]; then
+              BASE_TAG=$(jq -r '.tag_name // empty' /tmp/latest-release.json)
+              if [ -z "$BASE_TAG" ]; then
+                echo "releases/latest 响应里没有 tag_name，拒绝继续"
+                exit 1
+              fi
+              echo "上一个正式 Release: $BASE_TAG"
+            else
+              echo "查询 releases/latest 失败（HTTP $HTTP_CODE），拒绝继续："
+              cat /tmp/latest-release.json
+              exit 1
             fi
           fi
 
           echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
-          echo "使用基础标签: ${BASE_TAG:-无}"
 
           # 检查是否有提交
           if [ -n "$BASE_TAG" ]; then
@@ -72,16 +87,21 @@ jobs:
       - name: 生成变更日志（写入 CHANGELOG.md 并随版本提交）
         id: changelog
         if: steps.check.outputs.skip_release == 'false'
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          BASE_TAG: ${{ steps.check.outputs.base_tag }}
         run: |
-          ARGS="--tag ${{ github.event.inputs.version }} --with-hash"
-          if [ -n "${{ steps.check.outputs.base_tag }}" ]; then
-            ARGS="$ARGS --base ${{ steps.check.outputs.base_tag }}"
+          if [ -n "$BASE_TAG" ]; then
+            node tools/generate-changelog.js --tag "$RELEASE_VERSION" --with-hash --base "$BASE_TAG" --output-only
+          else
+            node tools/generate-changelog.js --tag "$RELEASE_VERSION" --with-hash --all --output-only
           fi
-          node tools/generate-changelog.js $ARGS --output-only
 
       - name: 更新版本号
         if: steps.check.outputs.skip_release == 'false'
-        run: node tools/update-version.mjs "${{ github.event.inputs.version }}"
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: node tools/update-version.mjs "$RELEASE_VERSION"
 
       - name: 提交版本更新
         id: commit
@@ -129,30 +149,18 @@ jobs:
         with:
           node-version: "20"
 
-      - name: 解析基础标签
-        id: base-tag
-        run: |
-          if [ -n "${{ github.event.inputs.base_tag }}" ]; then
-            BASE_TAG="${{ github.event.inputs.base_tag }}"
-          else
-            BASE_TAG=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
-              | jq -r '.tag_name' 2>/dev/null)
-            if [ "$BASE_TAG" = "null" ]; then
-              BASE_TAG=""
-            fi
-          fi
-          echo "base_tag=$BASE_TAG" >> $GITHUB_OUTPUT
-
       - name: 生成变更日志
         id: changelog
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          # 与 bump-version 使用同一个基准，避免两处各自查询产生分歧
+          BASE_TAG: ${{ needs.bump-version.outputs.base_tag }}
         run: |
-          ARGS="--tag ${{ github.event.inputs.version }} --with-hash"
-          if [ -n "${{ steps.base-tag.outputs.base_tag }}" ]; then
-            ARGS="$ARGS --base ${{ steps.base-tag.outputs.base_tag }}"
+          if [ -n "$BASE_TAG" ]; then
+            CHANGELOG_CONTENT=$(node tools/generate-changelog.js --tag "$RELEASE_VERSION" --with-hash --base "$BASE_TAG" --output-only)
+          else
+            CHANGELOG_CONTENT=$(node tools/generate-changelog.js --tag "$RELEASE_VERSION" --with-hash --all --output-only)
           fi
-
-          CHANGELOG_CONTENT=$(node tools/generate-changelog.js $ARGS --output-only)
 
           echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
@@ -183,6 +191,8 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
+          # tag 精确指向本次构建的提交；不依赖默认分支当时的 HEAD
+          target_commitish: ${{ needs.bump-version.outputs.new_sha }}
           body: ${{ steps.changelog.outputs.changelog_content }}
           draft: false
           prerelease: false

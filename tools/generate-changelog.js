@@ -41,6 +41,7 @@ function parseArgs() {
   const args = process.argv.slice(2);
   let tagName = null;
   let latest = null;
+  let all = false;
   let withHash = false;
   let withCommitizen = false;
   let outputOnly = false;
@@ -51,6 +52,8 @@ function parseArgs() {
       tagName = args[++i];
     } else if (arg === "--base" || arg === "--latest" || arg === "-b") {
       latest = args[++i];
+    } else if (arg === "--all" || arg === "-a") {
+      all = true;
     } else if (arg === "-wh" || arg === "--with-hash") {
       withHash = true;
     } else if (arg === "-wc" || arg === "--with-commitizen") {
@@ -63,7 +66,8 @@ function parseArgs() {
 
 选项:
   --tag, -t <标签>      指定发布标签名称
-  --base, --latest, -b <标签>  指定基础标签
+  --base, --latest, -b <标签>  指定基础标签（上一个正式 Release；发布流程必传）
+  --all, -a             从最初提交开始（仓库还没有正式 Release 时使用）
   -wh, --with-hash      显示提交哈希
   -wc, --with-commitizen  保留 commitizen 前缀
   --output-only         仅输出 changelog 内容（用于 CI/CD）
@@ -73,7 +77,7 @@ function parseArgs() {
     }
   }
 
-  return { tagName, latest, withHash, withCommitizen, outputOnly };
+  return { tagName, latest, all, withHash, withCommitizen, outputOnly };
 }
 
 function callCommand(command) {
@@ -133,11 +137,15 @@ function parseCategory(message) {
   return "其他 | Other";
 }
 
-function getCommits(latest = null) {
+function getCommits(latest = null, fromBeginning = false) {
   let gitCommand;
-  if (latest) {
+  if (fromBeginning) {
+    // 明确要求全部历史（首次正式发布）
+    gitCommand = 'git log HEAD --pretty=format:"%H%n%aN%n%s"';
+  } else if (latest) {
     gitCommand = `git log ${latest}..HEAD --pretty=format:"%H%n%aN%n%s"`;
   } else {
+    // 本地预览兜底：只取最近 50 条；发布流程必须显式传 --base 或 --all
     gitCommand = 'git log --pretty=format:"%H%n%aN%n%s" -n 50';
   }
 
@@ -281,36 +289,36 @@ function generateMd(classifiedData, tagName, latest, _withHash = false) {
   return lines.join("\n");
 }
 
-function writeToFile(content, append = false) {
-  if (append) {
-    fs.appendFileSync(changelogPath, "\n" + content, "utf8");
-  } else {
-    fs.writeFileSync(changelogPath, content, "utf8");
-  }
+function writeToFile(content) {
+  // 始终追加：CHANGELOG.md 的历史段落绝不被覆盖（无 --base 时旧代码会整篇覆盖）
+  fs.appendFileSync(changelogPath, "\n" + content, "utf8");
 }
 
 function main() {
-  const { tagName, latest, withHash, withCommitizen, outputOnly } = parseArgs();
+  const { tagName, latest, all, withHash, withCommitizen, outputOnly } =
+    parseArgs();
 
-  const resolvedLatest = latest || getLatestTag();
+  // 基准：CI 只能传 --base（上一个正式 Release，releases/latest 天然排除 prerelease 快照）
+  // 或 --all（仓库还没有正式 Release）。两者都没有时只做本地预览，不用于发布。
+  const fromBeginning = !latest && all;
+  const resolvedLatest = latest || (fromBeginning ? null : getLatestTag());
   const resolvedTagName = tagName || getCurrentTag();
+  const target = resolvedTagName || "HEAD";
 
-  if (!outputOnly) {
-    console.log("📊 正在生成变更日志...");
-    if (resolvedLatest) {
-      console.log(`📌 从: ${resolvedLatest}`);
-    }
-    if (resolvedTagName) {
-      console.log(`🏷️  到: ${resolvedTagName}`);
-    }
-    console.log("");
+  // 范围信息一律写 stderr：--output-only 的 stdout 会被 CI 直接当作发布正文
+  if (resolvedLatest) {
+    console.error(`📌 变更范围: ${resolvedLatest}..${target}`);
+  } else if (fromBeginning) {
+    console.error(`📌 变更范围: 最初提交..${target}（--all）`);
+  } else {
+    console.error(
+      "⚠️  未指定 --base 或 --all：仅统计最近 50 条提交（本地预览用途，不要用于发布）",
+    );
   }
 
-  const commits = getCommits(resolvedLatest);
+  const commits = getCommits(resolvedLatest, fromBeginning);
   if (commits.length === 0) {
-    if (!outputOnly) {
-      console.log("⚠️  没有找到提交记录");
-    }
+    console.error("⚠️  没有找到提交记录");
     return;
   }
 
@@ -322,12 +330,12 @@ function main() {
     withHash,
   );
 
-  writeToFile(markdown, !!resolvedLatest);
+  writeToFile(markdown);
 
   if (outputOnly) {
     console.log(markdown);
   } else {
-    console.log("✅ 变更日志已更新: CHANGELOG.md");
+    console.error("✅ 变更日志已追加到: CHANGELOG.md");
     console.log("\n" + markdown);
   }
 }

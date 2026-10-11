@@ -460,6 +460,16 @@
 - **PLAN 更新：** 无清单勾选变化；本记录新增。
 - **剩余工作：** 推送后在 Actions 手动运行一次 Create Release 验证；注意 `release.yml` → `build.yml` → `checks.yml` 为三层可复用工作流调用（GitHub 上限为四层），首跑需确认该嵌套调用被接受。
 
+### 2026-10-11（CI 修复二）：Release Changelog 基准固定为上一个正式 Release
+
+- **问题：** 按用户要求核对"Release Changelog 与上一个 Release 对比、不与周快照对比"时发现实现有漏洞：`releases/latest` 确实排除 prerelease（快照），**但取不到基准时会静默降级**——`generate-changelog.js` 的 `getLatestTag()` 用 `git describe --tags --match "v*"`（仓库只有 `26w41a`~`26w41e` 快照 tag、没有任何 `v*` tag，而 Release tag 名完全取自输入），拿不到就退化为 `git log -n 50`；且 `writeToFile(markdown, !!resolvedLatest)` 在没有 base 时是**整篇覆盖** CHANGELOG.md。`release.yml` 则把 API 的 404 与其他失败一律当作"没有基准"。
+- **证据：** `GET /releases/latest` → 404（仓库没有任何正式 Release，4 个快照全为 `prerelease=true`）；`git ls-remote --tags origin` 只有 `26w41a`~`26w41e`；CHANGELOG.md 现存唯一 `## 0.3.0` 段落由失败的发布尝试 `1c644eb` 写入，更早的 `v0.2.1` 段落已被下一次覆盖冲掉。
+- **本次完成（按用户确认：首次发布用 `--all`，旧段落本次不动）：** ① Release 基准固定为「上一个正式 Release」——`releases/latest`（GitHub 保证只返回非 prerelease / 非 draft，周快照永远不会被选为基准）；仅 HTTP 404（确实还没有正式 Release）时改用 `--all` 覆盖全部历史，其他 HTTP 错误直接失败、不再静默猜；手动 `base_tag` 输入优先。② 基准只在 `bump-version` 解析一次，经 job output 传给 `create-release`，两处不再各自查询。③ `generate-changelog.js` 新增 `--all`；范围信息一律写 stderr（`--output-only` 的 stdout 会被 CI 当作发布正文）；写入改为**始终追加**，任何模式都不再覆盖 CHANGELOG.md 历史；无 `--base` 且无 `--all` 时明确警告"仅最近 50 条，本地预览用"。④ 版本号与 `base_tag` 输入统一经 env 传入，不再拼进 shell 脚本。⑤ `action-gh-release` 增加 `target_commitish: new_sha`，tag 精确指向本次构建的提交。
+- **验证方式与结果：** 在隔离目录实跑三种模式——`--all`（116 行 stdout，stderr `最初提交..v0.4.0（--all）`）、`--base 26w41d`（20 行，stderr `26w41d..v0.4.0`）、无基准（58 行 + stderr 预览警告）；三种模式下 stdout 均无日志混入（可安全被 `$(...)` 捕获）；隔离目录的 CHANGELOG.md 原有 `## 0.3.0` 段落保留在首行、三次生成全部追加在尾部，证明不再覆盖；实跑后仓库工作区未被污染。另：`pnpm run format:check` 通过，`release.yml` 经 js-yaml 解析核对。
+- **限制：** 本机无法执行 GitHub Actions；首次发布 `--all` 的实际篇幅与 Release 正文需推送后实际发布确认。
+- **PLAN 更新：** 无清单勾选变化；本记录新增。
+- **剩余工作：** 推送后触发一次 Create Release 验证；CHANGELOG.md 中由失败发布写入的 `## 0.3.0` 段落与"最新在最下"的追加顺序按用户选择本次不处理。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱
