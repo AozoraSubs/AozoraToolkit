@@ -20,3 +20,37 @@ fn windows_test_binary_has_common_controls_v6_manifest() {
         exe.display()
     );
 }
+
+/// 能力检测结果的序列化结构必须与前端 `CapabilityReport` 对齐
+/// （camelCase 字段名 + 编码器逐项可用性 + 显卡列表）。
+///
+/// 只构造数据、不启动 FFmpeg，因此在任何平台都可运行。
+#[test]
+fn capability_report_serializes_for_the_frontend() {
+    use aozora_encode_lib::capability_dto_for_test;
+
+    let json = capability_dto_for_test();
+    for key in [
+        "\"encoders\"",
+        "\"encoderCount\"",
+        "\"filterCount\"",
+        "\"hasSubtitlesFilter\"",
+        "\"hwAccels\"",
+        "\"gpus\"",
+        "\"warnings\"",
+    ] {
+        assert!(json.contains(key), "能力报告缺少字段 {key}：{json}");
+    }
+    for key in [
+        "\"id\"",
+        "\"label\"",
+        "\"vendor\"",
+        "\"codec\"",
+        "\"hardware\"",
+        "\"listed\"",
+        "\"usable\"",
+        "\"reason\"",
+    ] {
+        assert!(json.contains(key), "编码器条目缺少字段 {key}：{json}");
+    }
+}

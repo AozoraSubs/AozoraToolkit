@@ -37,6 +37,39 @@ pub(crate) fn exe_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// 能力检测结果的 JSON 结构（集成测试用，不启动 FFmpeg）。
+///
+/// 前端按 camelCase 字段名读取该结构，这里构造一份固定的报告序列化一次，
+/// 保证字段名与 `CapabilityReport` 的改动同步。
+pub fn capability_dto_for_test() -> String {
+    use aozora_core::capabilities::{CapabilityReport, EncoderAvailability, GpuAdapter};
+    use aozora_core::encode::EncoderVendor;
+
+    let report = CapabilityReport {
+        encoders: vec![EncoderAvailability {
+            id: "libx264".to_string(),
+            label: "H.264（libx264，软件）".to_string(),
+            vendor: EncoderVendor::Software,
+            codec: "h264".to_string(),
+            hardware: false,
+            listed: true,
+            usable: true,
+            reason: None,
+        }],
+        encoder_count: 1,
+        filter_count: 1,
+        has_subtitles_filter: true,
+        hw_accels: vec!["cuda".to_string()],
+        gpus: vec![GpuAdapter {
+            name: "测试适配器".to_string(),
+            vendor: "nvidia".to_string(),
+            driver: Some("1.2.3".to_string()),
+        }],
+        warnings: Vec::new(),
+    };
+    serde_json::to_string(&report).unwrap_or_else(|_| "{}".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

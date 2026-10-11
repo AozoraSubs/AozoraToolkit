@@ -369,6 +369,30 @@
 - **PLAN 更新：** 无清单勾选变化（M2 已完成，本项为其扩展）；本记录新增。
 - **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
 
+### 2026-10-10（M1 深化）：按实际环境检测编码器与显卡，不再硬编码
+
+- **本次完成：** 按用户要求，编码器可用性从"硬编码 5 个 key 的布尔值"改为**按用户真实运行环境检测**，并检测显卡以确定可用硬件编码器（NVIDIA / AMD / Intel）。
+  1. 编码器目录扩充（`encode::ENCODER_SPECS`，共 **12 项**）：软件 `libx264` / `libx265` / `libvpx-vp9`，NVIDIA `h264_nvenc` / `hevc_nvenc` / `av1_nvenc`，Intel `h264_qsv` / `hevc_qsv` / `av1_qsv`，AMD `h264_amf` / `hevc_amf` / `av1_amf`。每项新增 `label` / `vendor` / `family` / `codec` / `quality_label` / `zero_bitrate` 字段。
+  2. 参数写法按家族区分（`planner::push_video_quality_args`）：软件 `-preset … -crf N`；libvpx-vp9 `-deadline good -cpu-used N -row-mt 1 -crf N -b:v 0`（CRF 必须配 `-b:v 0`，否则退化为受限 VBR）；NVENC `-preset p1…p7 -rc vbr -cq N`；QSV `-preset … -global_quality N`（ICQ）；AMF `-quality speed|balanced|quality -rc cqp -qp_i N -qp_p N`。
+  3. **两段式可用性判定**（`capabilities`）：先看 `ffmpeg -encoders` 是否包含该编码器，再对**硬件编码器实拍一次**（5 帧 320×240 → `-f null`，不写文件），排除"编译进来了但本机没有对应硬件 / 驱动不工作"。软件编码器只要编译进来即视为可用。
+  4. 显卡检测（`capabilities::detect_gpu_adapters`）：Windows 走 PowerShell + CIM `Win32_VideoController`（名称 / 厂商 / 驱动版本），macOS 走 `system_profiler`，Linux 读 `/sys/class/drm`；厂商归一化为 `nvidia` / `amd` / `intel` / `other`（虚拟显示适配器归 `other`）。
+  5. 前端不再硬编码可用性：`CapabilityReport.encoders` 改为逐项 `{id,label,vendor,codec,hardware,listed,usable,reason}`；压制页编码器下拉**只列出本机可用项**并按厂商分组（软件 / NVIDIA / AMD / Intel），检测未完成时提示"正在检测可用编码器…"；当前编码器不可用时（例如预设来自另一台机器）自动回退到可用默认项并提示。设置页新增「显卡」区块，并在编码器列表逐项显示不可用原因。
+  6. 一致性保障：`src-tauri/tests/smoke.rs` 新增 DTO 字段结构测试（前端按 camelCase 读取该结构）。
+- **验证方式与结果（全部实际执行）：**
+  - Rust：`cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --workspace`（**100 单元 + 2 冒烟通过**，新增 QSV / AMF / VP9 参数用例、`extract_encoder_error` 用例、显卡厂商归一化与 JSON 解析用例、可用性判定用例）。
+  - **本机实机检测结果（RTX 4080 Laptop + AMD Radeon 610M + gyan full build ffmpeg 9.0）**：`libx264` / `libx265` / `libvpx-vp9` 可用；`h264_nvenc` / `hevc_nvenc` 可用；`av1_nvenc` **不可用**（RTX 40 系无 AV1 编码单元，`No capable devices found`）；`h264_amf` / `hevc_amf` 可用；`av1_amf` 与全部 `*_qsv` **不可用**（本机无可用 Intel MFX 实现）。检测耗时约 2.5s，结果在应用会话内缓存。
+  - 实机集成：`cargo test --workspace -- --ignored` **13/13 通过**，其中 `encode_honours_configured_container` 扩展为 MKV(x264) / MP4(x264) / **WebM(libvpx-vp9 + Opus 音轨)** 三条真实压制路径，成品经 FFprobe 校验编码格式正确、临时文件清理正常。
+  - 前端：`pnpm run check`（0 错误）、`lint`、`format:check`、`test`（**53 通过**，新增可用性判定、默认编码器挑选、真实检测报告 → 列表映射、WebM 音频兼容性用例）、`build` 全部通过。
+  - 实机界面：`pnpm tauri dev` + `PrintWindow` 抓图确认编码器下拉为「H.264（libx264，软件）」并显示说明「列表来自本机 FFmpeg 与显卡检测：硬件编码器均在检测时实拍验证」。
+- **顺带修正（实测发现）：** WebM 容器除了不接受 H.264，也**不接受 AAC 音轨**（`Only VP8 or VP9 or AV1 video and Vorbis or Opus audio ... are supported for WebM`）；应用目前固定 `-c:a copy`、不做音频转码，因此界面对"WebM + 非 Opus/Vorbis 音轨"新增红色提示，容器说明也改为"音轨为 AAC 等格式时会被拒绝"。
+- **限制（如实记录）：**
+  - QSV 与 AMF 的 AV1 路径、以及所有 QSV 路径在本机**无法实测**（本机无可用 Intel MFX；Radeon 610M 无 AV1 编码单元），参数按 FFmpeg 9.0 的 `-h encoder=` 输出与官方文档编写；这类编码器只有在通过实拍探测后才会出现在列表里，因此参数错误不会呈现为"可用但一压就失败"。
+  - 实拍探测判定的是"能否编码 5 帧合成画面"，不保证特定分辨率 / 像素格式（例如 10-bit P010）下的可用性；像素格式仍由用户选择，失败时由 FFmpeg 报错。
+  - 非 Windows 平台（macOS / Linux）本轮不做实拍探测，只按构建是否包含判断；显卡检测在 macOS / Linux 未实机验证。
+  - 音频仍是"复制原音轨"，没有音频编码选项，所以 WebM 仅适用于 Opus / Vorbis 音轨的源。
+- **PLAN 更新：** 无清单勾选变化（M1 的"检测实际可用的编码器与滤镜能力"仍是已完成状态，本次为该条的深化）；本记录新增。
+- **剩余工作：** 回到 M4（音轨 / 字幕轨 / 章节映射、ASS 处理、MKV 封装完善）。
+
 ---
 
 ## 技术方案正文：轻量动画视频压制工具箱

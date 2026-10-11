@@ -6,7 +6,7 @@
     refreshDetection,
     toolsState,
   } from "../stores/tools.svelte";
-  import type { CapabilityReport, ToolInfo } from "../types/tools";
+  import type { ToolInfo } from "../types/tools";
   import { toolSourceLabel } from "../utils/toolSourceLabel";
 
   type AppInfo = {
@@ -31,16 +31,19 @@
     { id: "ffprobe", label: "FFprobe" },
   ];
 
-  const KNOWN_ENCODERS: Array<{
-    key: keyof CapabilityReport["encoders"];
-    label: string;
-  }> = [
-    { key: "libx264", label: "libx264（H.264 软件）" },
-    { key: "libx265", label: "libx265（HEVC 软件）" },
-    { key: "h264Nvenc", label: "h264_nvenc（NVIDIA H.264）" },
-    { key: "hevcNvenc", label: "hevc_nvenc（NVIDIA HEVC）" },
-    { key: "av1Nvenc", label: "av1_nvenc（NVIDIA AV1）" },
-  ];
+  /** 显卡厂商标识 → 显示名。 */
+  function gpuVendorLabel(vendor: string): string {
+    switch (vendor) {
+      case "nvidia":
+        return "NVIDIA";
+      case "amd":
+        return "AMD";
+      case "intel":
+        return "Intel";
+      default:
+        return "其他";
+    }
+  }
 
   async function refresh(force = true) {
     error = null;
@@ -147,20 +150,45 @@
     </div>
   {/if}
 
+  <h2>显卡</h2>
+
+  {#if capabilities}
+    {#if capabilities.gpus.length > 0}
+      <ul class="enc-list">
+        {#each capabilities.gpus as gpu (gpu.name)}
+          <li>
+            <span class="badge">{gpuVendorLabel(gpu.vendor)}</span>
+            <span>{gpu.name}</span>
+            {#if gpu.driver}
+              <span class="hint small">驱动 {gpu.driver}</span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      <p class="hint small">
+        硬件编码器以「检测时实拍一次」的结果为准：显卡存在但驱动/编码单元不支持时，
+        对应编码器不会出现在压制页的列表里。
+      </p>
+    {:else}
+      <p class="hint small">未检测到显示适配器。</p>
+    {/if}
+  {:else}
+    <p class="hint small">正在检测…</p>
+  {/if}
+
   <h2>编码器与滤镜能力</h2>
 
   {#if capabilities}
     <ul class="enc-list">
-      {#each KNOWN_ENCODERS as enc (enc.key)}
+      {#each capabilities.encoders as enc (enc.id)}
         <li>
-          <span
-            class="status-mark"
-            class:ok={capabilities.encoders[enc.key]}
-            aria-hidden="true"
-          >
-            {capabilities.encoders[enc.key] ? "✓" : "✗"}
+          <span class="status-mark" class:ok={enc.usable} aria-hidden="true">
+            {enc.usable ? "✓" : "✗"}
           </span>
           <span>{enc.label}</span>
+          {#if !enc.usable && enc.reason}
+            <span class="hint small">{enc.reason}</span>
+          {/if}
         </li>
       {/each}
     </ul>

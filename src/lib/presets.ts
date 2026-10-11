@@ -1,4 +1,8 @@
-import { CONTAINER_OPTIONS, encoderDefinition } from "./encoders";
+import {
+  CONTAINER_OPTIONS,
+  encoderDefinition,
+  encoderUsable,
+} from "./encoders";
 import type { Container, SubtitleMode, VideoConfig } from "./types/encode";
 import type { Preset, PresetInput } from "./types/preset";
 import type { CapabilityReport } from "./types/tools";
@@ -24,19 +28,12 @@ export function presetSummary(preset: Preset): string {
   } · ${overwrite}`;
 }
 
-/** 预设要求的编码器在当前 FFmpeg 中是否可用（能力尚未检测时视为可用）。 */
+/** 预设要求的编码器在当前 FFmpeg 与显卡上是否可用（能力尚未检测时视为可用）。 */
 export function presetEncoderAvailable(
   preset: Preset,
   capabilities: CapabilityReport | null,
 ): boolean {
-  if (!capabilities) {
-    return true;
-  }
-  const def = encoderDefinition(preset.video.encoderId);
-  if (!def) {
-    return false;
-  }
-  return capabilities.encoders[def.capabilityKey];
+  return encoderUsable(capabilities, preset.video.encoderId);
 }
 
 /** 由预设生成"另存为我的预设"的提交内容（不携带外部字幕路径）。 */

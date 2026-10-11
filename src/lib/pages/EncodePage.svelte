@@ -6,12 +6,17 @@
   import {
     CONTAINER_OPTIONS,
     containerFromPath,
+    containerSupportsAudioCodec,
     containerSupportsEncoder,
     ENCODER_DEFINITIONS,
     encoderDefinition,
+    encoderUsable,
+    pickDefaultEncoder,
     suggestOutputPath,
     swapOutputExtension,
     validateVideoConfig,
+    vendorLabel,
+    type EncoderVendor,
   } from "../encoders";
   import { copyName, matchesPreset, presetEncoderAvailable } from "../presets";
   import {
@@ -57,6 +62,24 @@
   const job = $derived(jobState.job);
   const jobRunning = $derived(!!job && !job.finished);
   const capabilities = $derived(toolsState.capabilities);
+
+  /**
+   * 编码器下拉的数据源：**只列出本机真正可用的编码器**
+   * （后端检测：FFmpeg 是否编译了它 + 硬件编码器实拍是否成功）。
+   * 按厂商分组，便于用户理解硬件编码器的来源。
+   */
+  const encoderGroups = $derived.by(() => {
+    const order: EncoderVendor[] = ["software", "nvidia", "amd", "intel"];
+    return order
+      .map((vendor) => ({
+        vendor,
+        items: ENCODER_DEFINITIONS.filter(
+          (def) => def.vendor === vendor && encoderUsable(capabilities, def.id),
+        ),
+      }))
+      .filter((group) => group.items.length > 0);
+  });
+
   const currentDefinition = $derived(
     encoderDefinition(encodeForm.video.encoderId),
   );
@@ -82,6 +105,29 @@
     !!encodeForm.outputPath.trim() &&
       containerFromPath(encodeForm.outputPath) !== encodeForm.container,
   );
+
+  /**
+   * 能力检测完成后（或用户换了 FFmpeg 实例后），若当前编码器在本机不可用
+   * （例如预设里保存的是 NVENC，但这台机器没有 NVIDIA 显卡），
+   * 自动退回一个可用的默认编码器并提示。
+   */
+  $effect(() => {
+    if (!capabilities) {
+      return;
+    }
+    const ids = encoderGroups.flatMap((group) => group.items.map((d) => d.id));
+    if (ids.includes(encodeForm.video.encoderId)) {
+      return;
+    }
+    const fallback = pickDefaultEncoder(capabilities);
+    if (!fallback) {
+      return;
+    }
+    const previous = encodeForm.video.encoderId;
+    resetVideoForEncoder(fallback);
+    notice = `当前 FFmpeg / 显卡不支持 ${previous}，已切换为 ${fallback}`;
+    void refreshPreview();
+  });
   const commandLine = $derived(
     previewArgs
       ? formatCommandLine(
@@ -92,14 +138,7 @@
   );
 
   function isAvailable(encoderId: string): boolean {
-    if (!capabilities) {
-      return true; // 能力尚未加载时先允许选择，启动前会再校验
-    }
-    const def = encoderDefinition(encoderId);
-    if (!def) {
-      return false;
-    }
-    return capabilities.encoders[def.capabilityKey];
+    return encoderUsable(capabilities, encoderId);
   }
 
   async function pickSubtitleFile() {
@@ -498,12 +537,25 @@
           bind:value={encodeForm.video.encoderId}
           onchange={onEncoderChange}
         >
-          {#each ENCODER_DEFINITIONS as def (def.id)}
-            <option value={def.id} disabled={!isAvailable(def.id)}>
-              {def.label}{!isAvailable(def.id) ? "（当前 FFmpeg 不支持）" : ""}
-            </option>
+          {#each encoderGroups as group (group.vendor)}
+            <optgroup label={vendorLabel(group.vendor)}>
+              {#each group.items as def (def.id)}
+                <option value={def.id}>{def.label}</option>
+              {/each}
+            </optgroup>
           {/each}
         </select>
+        {#if !capabilities}
+          <span class="field-hint">正在检测可用编码器…</span>
+        {:else if encoderGroups.length === 0}
+          <span class="field-hint warn">
+            当前 FFmpeg 构建没有可用的编码器，请检查设置页的工具路径
+          </span>
+        {:else}
+          <span class="field-hint">
+            列表来自本机 FFmpeg 与显卡检测：硬件编码器均在检测时实拍验证
+          </span>
+        {/if}
       </label>
 
       <label class="field">
@@ -631,6 +683,13 @@
           <span class="field-hint warn">
             {currentDefinition?.label ?? encodeForm.video.encoderId} 编码的码流无法封装进该格式，
             请改用 MKV / MP4，或换用 AV1 编码器
+          </span>
+        {/if}
+        {#if !containerSupportsAudioCodec(encodeForm.container, info?.audioStreams[0]?.codecName ?? null)}
+          <span class="field-hint warn">
+            WebM 不接受该音轨编码（{info?.audioStreams[0]
+              ?.codecName}）——应用目前复制原音轨、 不做音频转码，请改用 MKV /
+            MP4
           </span>
         {/if}
       </label>

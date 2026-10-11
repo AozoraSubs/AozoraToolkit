@@ -1,5 +1,3 @@
-import type { KnownEncoders } from "./tools";
-
 export type QualityMode = "crf" | "cq";
 export type AudioMode = "copy";
 export type SubtitleMode = "copy" | "drop" | "burn";
@@ -114,5 +112,5 @@ export interface ActiveJobUi {
   historyError: string | null;
 }
 
-/** 编码器能力键（与 Rust `KnownEncoders` 对应）。 */
-export type EncoderCapabilityKey = keyof KnownEncoders;
+/** 编码器能力键（编码器 ID，与后端能力报告中的 `id` 对应）。 */
+export type EncoderCapabilityKey = string;

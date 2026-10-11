@@ -8,10 +8,14 @@ use std::path::PathBuf;
 
 pub const ENCODE_CONFIG_SCHEMA_VERSION: u32 = 1;
 
-/// 软件编码器（x264 / x265，CRF 质量控制）。
-pub const SOFTWARE_ENCODERS: [&str; 2] = ["libx264", "libx265"];
-/// NVIDIA 硬件编码器（CQ 质量控制）。
+/// 应用内置的软件编码器（常数仅用于文档与测试断言）。
+pub const SOFTWARE_ENCODERS: [&str; 3] = ["libx264", "libx265", "libvpx-vp9"];
+/// 应用内置的 NVIDIA 硬件编码器。
 pub const NVENC_ENCODERS: [&str; 3] = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"];
+/// 应用内置的 Intel Quick Sync 编码器。
+pub const QSV_ENCODERS: [&str; 3] = ["h264_qsv", "hevc_qsv", "av1_qsv"];
+/// 应用内置的 AMD AMF 编码器。
+pub const AMF_ENCODERS: [&str; 3] = ["h264_amf", "hevc_amf", "av1_amf"];
 
 // ---------- 配置模型 ----------
 
@@ -57,7 +61,7 @@ impl Default for VideoConfig {
         let spec = &ENCODER_SPECS[0];
         Self {
             encoder_id: spec.encoder_id.to_string(),
-            quality_mode: default_quality_mode(spec.family),
+            quality_mode: quality_mode_of(spec),
             quality_value: spec.default_quality,
             preset: spec.default_preset.to_string(),
             pixel_format: None,
@@ -180,17 +184,61 @@ impl Default for OutputConfig {
 
 // ---------- 编码器规格 ----------
 
+/// 编码器家族：决定 FFmpeg 参数写法（预设 / 质量控制方式）。
+///
+/// - `Software`：libx264 / libx265 / libvpx-vp9，用 `-preset` + `-crf`；
+/// - `Nvenc`（NVIDIA）：`-preset p1…p7 -rc vbr -cq N`；
+/// - `Qsv`（Intel Quick Sync）：`-preset … -global_quality N`（ICQ）；
+/// - `Amf`（AMD）：`-quality … -rc cqp -qp_i N -qp_p N`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderFamily {
     Software,
     Nvenc,
+    Qsv,
+    Amf,
+}
+
+/// 编码器的硬件归属：用于在检测结果里说明"哪个编码器来自哪块显卡"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EncoderVendor {
+    /// 纯软件编码（CPU）。
+    Software,
+    Nvidia,
+    Amd,
+    Intel,
+}
+
+impl EncoderVendor {
+    pub fn label(self) -> &'static str {
+        match self {
+            EncoderVendor::Software => "软件（CPU）",
+            EncoderVendor::Nvidia => "NVIDIA",
+            EncoderVendor::Amd => "AMD",
+            EncoderVendor::Intel => "Intel",
+        }
+    }
+
+    /// 是否为硬件编码器（需要对应的显卡）。
+    pub fn is_hardware(self) -> bool {
+        !matches!(self, EncoderVendor::Software)
+    }
 }
 
 /// 单个编码器的静态规格：预设、质量范围、像素格式等（与能力检测无关的固有属性）。
 #[derive(Debug, Clone)]
 pub struct EncoderSpec {
     pub encoder_id: &'static str,
+    /// 用户可见名称（含厂商，例如 "H.264（h264_nvenc，NVIDIA）"）。
+    pub label: &'static str,
+    /// 硬件归属。
+    pub vendor: EncoderVendor,
+    /// 参数写法家族。
     pub family: EncoderFamily,
+    /// 输出视频编码格式（H.264 / HEVC / AV1 / VP9），用于容器兼容性提示。
+    pub codec: &'static str,
+    /// UI 中质量参数的名称（CRF / CQ / ICQ）。
+    pub quality_label: &'static str,
     /// 可用预设列表。
     pub presets: &'static [&'static str],
     /// 默认预设。
@@ -201,6 +249,8 @@ pub struct EncoderSpec {
     pub default_quality: u32,
     /// 支持的像素格式列表；`None` 条目代表"自动"。
     pub pixel_formats: &'static [Option<&'static str>],
+    /// 恒定质量是否需要显式 `-b:v 0`（libvpx-vp9 不加会退化为 VBR，CRF 失效）。
+    pub zero_bitrate: bool,
 }
 
 pub const X264_PRESETS: &[&str] = &[
@@ -228,55 +278,189 @@ pub const X265_PRESETS: &[&str] = &[
     "placebo",
 ];
 pub const NVENC_PRESETS: &[&str] = &["p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+/// Intel Quick Sync 预设（FFmpeg 接受名称，内部映射为 0–7）。
+pub const QSV_PRESETS: &[&str] = &[
+    "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow",
+];
+/// AMD AMF 质量档位（`-quality`）。
+pub const AMF_PRESETS: &[&str] = &["speed", "balanced", "quality"];
+/// libvpx-vp9 的速度档位（`-cpu-used`，越小越慢越好）。
+pub const VP9_PRESETS: &[&str] = &["0", "1", "2", "3", "4", "5"];
 
-/// 内置编码器规格。UI 按此展示参数，并在能力检测基础上过滤可用项。
+/// 编码器规格表。**这是"应用支持的编码器集合"，是否真正可用由能力检测决定**
+/// （见 `crate::capabilities`：先用 `ffmpeg -encoders` 判断是否编译进来，
+/// 再对硬件编码器做一次最小实拍探测，避免"编译进来了但机器上跑不起来"）。
 pub static ENCODER_SPECS: &[EncoderSpec] = &[
     EncoderSpec {
         encoder_id: "libx264",
+        label: "H.264（libx264，软件）",
+        vendor: EncoderVendor::Software,
         family: EncoderFamily::Software,
+        codec: "h264",
+        quality_label: "CRF",
         presets: X264_PRESETS,
         default_preset: "slow",
         quality_range: (0, 51),
         default_quality: 18,
         // 常见 libx264 构建为 8-bit，不支持 10-bit 像素格式。
         pixel_formats: &[None, Some("yuv420p")],
+        zero_bitrate: false,
     },
     EncoderSpec {
         encoder_id: "libx265",
+        label: "HEVC（libx265，软件）",
+        vendor: EncoderVendor::Software,
         family: EncoderFamily::Software,
+        codec: "hevc",
+        quality_label: "CRF",
         presets: X265_PRESETS,
         default_preset: "slow",
         quality_range: (0, 51),
         default_quality: 18,
         pixel_formats: &[None, Some("yuv420p"), Some("yuv420p10le")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "libvpx-vp9",
+        label: "VP9（libvpx-vp9，软件）",
+        vendor: EncoderVendor::Software,
+        family: EncoderFamily::Software,
+        codec: "vp9",
+        quality_label: "CRF",
+        presets: VP9_PRESETS,
+        default_preset: "2",
+        quality_range: (0, 63),
+        default_quality: 32,
+        pixel_formats: &[None, Some("yuv420p")],
+        // VP9 恒定质量需要显式 -b:v 0，否则 -crf 会退化为受限 VBR。
+        zero_bitrate: true,
     },
     EncoderSpec {
         encoder_id: "h264_nvenc",
+        label: "H.264（h264_nvenc，NVIDIA）",
+        vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
+        codec: "h264",
+        quality_label: "CQ",
         presets: NVENC_PRESETS,
         default_preset: "p5",
         quality_range: (0, 51),
         default_quality: 21,
         pixel_formats: &[None, Some("yuv420p")],
+        zero_bitrate: false,
     },
     EncoderSpec {
         encoder_id: "hevc_nvenc",
+        label: "HEVC（hevc_nvenc，NVIDIA）",
+        vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
+        codec: "hevc",
+        quality_label: "CQ",
         presets: NVENC_PRESETS,
         default_preset: "p5",
         quality_range: (0, 51),
         default_quality: 21,
         pixel_formats: &[None, Some("yuv420p"), Some("p010le")],
+        zero_bitrate: false,
     },
     EncoderSpec {
         encoder_id: "av1_nvenc",
+        label: "AV1（av1_nvenc，NVIDIA）",
+        vendor: EncoderVendor::Nvidia,
         family: EncoderFamily::Nvenc,
+        codec: "av1",
+        quality_label: "CQ",
         presets: NVENC_PRESETS,
         default_preset: "p5",
         // av1_nvenc 的 -cq 标尺为 0–63，与 h264/hevc_nvenc 的 0–51 不同。
         quality_range: (0, 63),
         default_quality: 30,
         pixel_formats: &[None, Some("yuv420p"), Some("p010le")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "h264_qsv",
+        label: "H.264（h264_qsv，Intel Quick Sync）",
+        vendor: EncoderVendor::Intel,
+        family: EncoderFamily::Qsv,
+        codec: "h264",
+        quality_label: "ICQ",
+        presets: QSV_PRESETS,
+        default_preset: "medium",
+        quality_range: (1, 51),
+        default_quality: 23,
+        pixel_formats: &[None, Some("nv12")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "hevc_qsv",
+        label: "HEVC（hevc_qsv，Intel Quick Sync）",
+        vendor: EncoderVendor::Intel,
+        family: EncoderFamily::Qsv,
+        codec: "hevc",
+        quality_label: "ICQ",
+        presets: QSV_PRESETS,
+        default_preset: "medium",
+        quality_range: (1, 51),
+        default_quality: 23,
+        pixel_formats: &[None, Some("nv12"), Some("p010le")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "av1_qsv",
+        label: "AV1（av1_qsv，Intel Quick Sync）",
+        vendor: EncoderVendor::Intel,
+        family: EncoderFamily::Qsv,
+        codec: "av1",
+        quality_label: "ICQ",
+        presets: QSV_PRESETS,
+        default_preset: "medium",
+        quality_range: (1, 63),
+        default_quality: 32,
+        pixel_formats: &[None, Some("nv12"), Some("p010le")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "h264_amf",
+        label: "H.264（h264_amf，AMD）",
+        vendor: EncoderVendor::Amd,
+        family: EncoderFamily::Amf,
+        codec: "h264",
+        quality_label: "QP",
+        presets: AMF_PRESETS,
+        default_preset: "balanced",
+        quality_range: (0, 51),
+        default_quality: 24,
+        pixel_formats: &[None, Some("yuv420p"), Some("nv12")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "hevc_amf",
+        label: "HEVC（hevc_amf，AMD）",
+        vendor: EncoderVendor::Amd,
+        family: EncoderFamily::Amf,
+        codec: "hevc",
+        quality_label: "QP",
+        presets: AMF_PRESETS,
+        default_preset: "balanced",
+        quality_range: (0, 51),
+        default_quality: 24,
+        pixel_formats: &[None, Some("yuv420p"), Some("nv12"), Some("p010le")],
+        zero_bitrate: false,
+    },
+    EncoderSpec {
+        encoder_id: "av1_amf",
+        label: "AV1（av1_amf，AMD）",
+        vendor: EncoderVendor::Amd,
+        family: EncoderFamily::Amf,
+        codec: "av1",
+        quality_label: "QP",
+        presets: AMF_PRESETS,
+        default_preset: "balanced",
+        quality_range: (0, 63),
+        default_quality: 30,
+        pixel_formats: &[None, Some("yuv420p"), Some("nv12"), Some("p010le")],
+        zero_bitrate: false,
     },
 ];
 
@@ -285,16 +469,20 @@ pub fn encoder_spec(encoder_id: &str) -> Option<&'static EncoderSpec> {
     ENCODER_SPECS.iter().find(|s| s.encoder_id == encoder_id)
 }
 
-fn default_quality_mode(family: EncoderFamily) -> QualityMode {
-    match family {
-        EncoderFamily::Software => QualityMode::Crf,
-        EncoderFamily::Nvenc => QualityMode::Cq,
-    }
-}
-
 /// 按编码器 ID 返回其质量控制模式（未知编码器返回 `None`）。
 pub fn quality_mode_for(encoder_id: &str) -> Option<QualityMode> {
-    encoder_spec(encoder_id).map(|spec| default_quality_mode(spec.family))
+    encoder_spec(encoder_id).map(quality_mode_of)
+}
+
+/// 编码器家族对应的质量控制模式。
+///
+/// 只有软件编码器用 CRF；NVENC 的 CQ、QSV 的 ICQ 与 AMD 的 QP 都走
+/// [`QualityMode::Cq`]（具体参数写法由 `planner::build_args` 按家族决定）。
+fn quality_mode_of(spec: &EncoderSpec) -> QualityMode {
+    match spec.family {
+        EncoderFamily::Software => QualityMode::Crf,
+        EncoderFamily::Nvenc | EncoderFamily::Qsv | EncoderFamily::Amf => QualityMode::Cq,
+    }
 }
 
 // ---------- 校验 ----------
@@ -311,16 +499,15 @@ pub fn validate_config(config: &EncodeConfig) -> Result<(), String> {
         format!(
             "未知编码器：{}（支持：{}）",
             config.video.encoder_id,
-            SOFTWARE_ENCODERS
+            ENCODER_SPECS
                 .iter()
-                .chain(NVENC_ENCODERS.iter())
-                .copied()
+                .map(|spec| spec.encoder_id)
                 .collect::<Vec<_>>()
                 .join("、")
         )
     })?;
 
-    let expected_mode = default_quality_mode(spec.family);
+    let expected_mode = quality_mode_of(spec);
     if config.video.quality_mode != expected_mode {
         return Err(format!(
             "编码器 {} 不支持质量模式 {:?}（应使用 {:?}）",
@@ -397,7 +584,7 @@ mod tests {
     #[test]
     fn unknown_encoder_is_rejected() {
         let mut config = EncodeConfig::default();
-        config.video.encoder_id = "libvpx-vp9".into();
+        config.video.encoder_id = "libvpx-vp8".into();
         let err = validate_config(&config).unwrap_err();
         assert!(err.contains("未知编码器"), "error: {err}");
     }

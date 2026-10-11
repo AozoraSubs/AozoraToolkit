@@ -35,24 +35,7 @@ pub fn build_args(
     push(&mut args, "0:v:0");
     push(&mut args, "-c:v");
     push(&mut args, &config.video.encoder_id);
-    push(&mut args, "-preset");
-    push(&mut args, &config.video.preset);
-    match (spec.family, config.video.quality_mode) {
-        (EncoderFamily::Software, QualityMode::Crf) => {
-            push(&mut args, "-crf");
-            push(&mut args, config.video.quality_value.to_string());
-        }
-        (EncoderFamily::Nvenc, QualityMode::Cq) => {
-            push(&mut args, "-cq");
-            push(&mut args, config.video.quality_value.to_string());
-        }
-        (family, mode) => {
-            return Err(format!(
-                "编码器 {}（{:?}）与质量模式 {:?} 不匹配",
-                config.video.encoder_id, family, mode
-            ));
-        }
-    }
+    push_video_quality_args(&mut args, spec, &config.video)?;
     if let Some(pf) = &config.video.pixel_format {
         push(&mut args, "-pix_fmt");
         push(&mut args, pf);
@@ -100,6 +83,77 @@ pub fn build_args(
 
 fn push(args: &mut Vec<OsString>, value: impl Into<OsString>) {
     args.push(value.into());
+}
+
+/// 按编码器家族生成视频质量参数（预设 + 质量控制）。
+///
+/// 各家族的实际选项名不同，且都以"实际可用的 FFmpeg 构建"为准：
+/// - 软件（libx264 / libx265）：`-preset <x264 预设> -crf N`；
+/// - 软件（libvpx-vp9）：`-deadline good -cpu-used N -crf N -b:v 0`
+///   ——VP9 的恒定质量必须显式 `-b:v 0`，否则会退化为受限 VBR；
+/// - NVENC：`-preset p1…p7 -rc vbr -cq N`（`-cq` 标尺 0–51 / AV1 为 0–63）；
+/// - Intel QSV：`-preset <名称> -global_quality N`（ICQ 模式）；
+/// - AMD AMF：`-quality <speed|balanced|quality> -rc cqp -qp_i N -qp_p N`。
+fn push_video_quality_args(
+    args: &mut Vec<OsString>,
+    spec: &encode::EncoderSpec,
+    video: &encode::VideoConfig,
+) -> Result<(), String> {
+    let value = video.quality_value.to_string();
+    match (spec.family, video.quality_mode) {
+        (EncoderFamily::Software, QualityMode::Crf) if spec.zero_bitrate => {
+            // libvpx-vp9：cpu-used 越小越慢越好（档次已按字符串给出）
+            push(args, "-deadline");
+            push(args, "good");
+            push(args, "-cpu-used");
+            push(args, &video.preset);
+            push(args, "-row-mt");
+            push(args, "1");
+            push(args, "-crf");
+            push(args, value);
+            push(args, "-b:v");
+            push(args, "0");
+        }
+        (EncoderFamily::Software, QualityMode::Crf) => {
+            push(args, "-preset");
+            push(args, &video.preset);
+            push(args, "-crf");
+            push(args, value);
+        }
+        (EncoderFamily::Nvenc, QualityMode::Cq) => {
+            push(args, "-preset");
+            push(args, &video.preset);
+            push(args, "-rc");
+            push(args, "vbr");
+            push(args, "-cq");
+            push(args, value);
+        }
+        (EncoderFamily::Qsv, QualityMode::Cq) => {
+            push(args, "-preset");
+            push(args, &video.preset);
+            // ICQ：global_quality 即质量等级（1–51，AV1 到 63）
+            push(args, "-global_quality");
+            push(args, value);
+        }
+        (EncoderFamily::Amf, QualityMode::Cq) => {
+            push(args, "-quality");
+            push(args, &video.preset);
+            push(args, "-rc");
+            push(args, "cqp");
+            // AMF 的恒定质量按帧类型给 QP；I/P 用同一值，B 帧交给编码器默认
+            push(args, "-qp_i");
+            push(args, &value);
+            push(args, "-qp_p");
+            push(args, &value);
+        }
+        (family, mode) => {
+            return Err(format!(
+                "编码器 {}（{family:?}）与质量模式 {mode:?} 不匹配",
+                spec.encoder_id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 生成烧录外部字幕的滤镜图字符串。
@@ -528,8 +582,65 @@ mod tests {
             .collect();
         let joined = text.join(" ");
         assert!(
-            joined.contains("-c:v hevc_nvenc -preset p7 -cq 21"),
+            joined.contains("-c:v hevc_nvenc -preset p7 -rc vbr -cq 21"),
             "args: {joined}"
+        );
+    }
+
+    #[test]
+    fn qsv_args_use_global_quality() {
+        let mut config = x264_config(23, "medium");
+        config.video.encoder_id = "hevc_qsv".into();
+        config.video.quality_mode = QualityMode::Cq;
+        config.video.pixel_format = Some("nv12".into());
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = joined.join(" ");
+        assert!(
+            joined.contains("-c:v hevc_qsv -preset medium -global_quality 23 -pix_fmt nv12"),
+            "args: {joined}"
+        );
+        assert!(!joined.contains("-crf"), "QSV 不应使用 -crf：{joined}");
+    }
+
+    #[test]
+    fn amf_args_use_cqp() {
+        let mut config = x264_config(24, "balanced");
+        config.video.encoder_id = "h264_amf".into();
+        config.video.quality_mode = QualityMode::Cq;
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.mkv")).unwrap();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = joined.join(" ");
+        assert!(
+            joined.contains("-c:v h264_amf -quality balanced -rc cqp -qp_i 24 -qp_p 24"),
+            "args: {joined}"
+        );
+    }
+
+    #[test]
+    fn vp9_args_force_constant_quality() {
+        let mut config = x264_config(32, "2");
+        config.video.encoder_id = "libvpx-vp9".into();
+        let args = build_args(&config, Path::new("in.mkv"), Path::new("out.webm")).unwrap();
+        let joined: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let joined = joined.join(" ");
+        // VP9 恒定质量必须带 -b:v 0，且用 cpu-used 而非 -preset
+        assert!(
+            joined.contains("-c:v libvpx-vp9 -deadline good -cpu-used 2 -row-mt 1 -crf 32 -b:v 0"),
+            "args: {joined}"
+        );
+        assert!(
+            !joined.contains("-preset"),
+            "libvpx-vp9 不应出现 -preset：{joined}"
         );
     }
 

@@ -410,11 +410,7 @@ mod tests {
     }
 
     fn config_for(encoder: &str, preset: &str, quality: u32) -> EncodeConfig {
-        let spec = encode::encoder_spec(encoder).expect("未知编码器");
-        let quality_mode = match spec.family {
-            encode::EncoderFamily::Software => encode::QualityMode::Crf,
-            encode::EncoderFamily::Nvenc => encode::QualityMode::Cq,
-        };
+        let quality_mode = encode::quality_mode_for(encoder).unwrap_or(encode::QualityMode::Crf);
         let mut config = EncodeConfig::default();
         config.video.encoder_id = encoder.to_string();
         config.video.quality_mode = quality_mode;
@@ -621,7 +617,8 @@ mod tests {
         std::fs::remove_dir_all(app_tmp).ok();
     }
 
-    /// 实机验证：输出封装格式由配置里的 container 决定（MP4 输出可读、扩展名一致）。
+    /// 实机验证：输出封装格式由配置里的 container 决定（扩展名一致、成品可读），
+    /// 并覆盖 WebM + libvpx-vp9 这条"软件 VP9 恒定质量"路径。
     #[tokio::test]
     #[ignore = "requires ffmpeg and ffprobe on PATH"]
     async fn encode_honours_configured_container() {
@@ -639,15 +636,39 @@ mod tests {
         let input = dir.join("input.mkv");
         generate_input(&ffmpeg, &input, 1);
 
-        for (container, ext) in [(Container::Mkv, "mkv"), (Container::Mp4, "mp4")] {
+        // WebM 容器只接受 Vorbis / Opus 音频，而应用固定 `-c:a copy`：
+        // 这里单独生成一份 Opus 音轨的输入才能走通 WebM 路径
+        // （音轨编码选项属 M4；未实现前 WebM 只适用于 Opus / Vorbis 源）。
+        let webm_input = dir.join("input-opus.mkv");
+        let remux = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(&input)
+            .args(["-c:v", "copy", "-c:a", "libopus", "-b:a", "96k"])
+            .arg(&webm_input)
+            .output()
+            .expect("生成 Opus 测试输入失败");
+        assert!(
+            remux.status.success(),
+            "生成 Opus 测试输入失败：{}",
+            String::from_utf8_lossy(&remux.stderr)
+        );
+
+        // (容器, 扩展名, 编码器, 预设, 质量, 输入)
+        let cases = [
+            (Container::Mkv, "mkv", "libx264", "veryfast", 23, &input),
+            (Container::Mp4, "mp4", "libx264", "veryfast", 23, &input),
+            // VP9 恒定质量需要 -b:v 0（planner 会补上），WebM 不接受 H.264
+            (Container::Webm, "webm", "libvpx-vp9", "4", 40, &webm_input),
+        ];
+        for (container, ext, encoder, preset, quality, source) in cases {
             let output = dir.join(format!("out-{ext}.{ext}"));
-            let mut config = config_for("libx264", "veryfast", 23);
+            let mut config = config_for(encoder, preset, quality);
             config.output.container = container;
             config.output.path = output.clone();
             let temp = planner::temp_output_path(&dir, &output, "e-test-container");
             // 临时输出沿用最终扩展名，FFmpeg 依扩展名选择封装器
             assert_eq!(temp.extension().unwrap(), ext);
-            let args = planner::build_args(&config, &input, &temp).unwrap();
+            let args = planner::build_args(&config, source, &temp).unwrap();
             let (_cancel_tx, cancel_rx) = watch::channel(false);
             let (event_tx, _event_rx) = collect_events();
 
@@ -655,7 +676,7 @@ mod tests {
                 EncodeRequest {
                     ffmpeg_path: ffmpeg.clone(),
                     args,
-                    input_path: input.clone(),
+                    input_path: source.clone(),
                     temp_path: temp.clone(),
                     final_path: output.clone(),
                     overwrite: false,
@@ -673,9 +694,15 @@ mod tests {
                 result.error
             );
             let info = probe_media(&ffprobe, &output).expect("输出探测失败");
-            // MP4 与 MKV 都应保留视频与音频流
             assert_eq!(info.video_streams.len(), 1, "{ext} 视频流数量不符");
             assert_eq!(info.audio_streams.len(), 1, "{ext} 音频流数量不符");
+            let codec = &info.video_streams[0].codec_name;
+            let expected_codec = if encoder == "libvpx-vp9" {
+                "vp9"
+            } else {
+                "h264"
+            };
+            assert_eq!(codec, expected_codec, "{ext} 视频编码不符");
             assert!(!temp.exists(), "{ext} 临时文件未清理");
         }
         std::fs::remove_dir_all(&dir).ok();

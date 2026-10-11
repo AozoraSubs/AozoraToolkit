@@ -606,7 +606,7 @@ mod tests {
     fn create_rejects_invalid_video_config() {
         let (store, _dir) = store("invalid");
         let mut bad = input("错误参数");
-        bad.video.encoder_id = "libvpx-vp9".to_string();
+        bad.video.encoder_id = "libvpx-vp8".to_string();
         let err = store.create(bad, 1).unwrap_err();
         assert!(err.contains("未知编码器"), "error: {err}");
 

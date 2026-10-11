@@ -11,17 +11,43 @@ import { describe, expect, it } from "vitest";
 import type { CapabilityReport } from "./types/tools";
 
 const capabilities: CapabilityReport = {
-  encoders: {
-    libx264: true,
-    libx265: true,
-    h264Nvenc: false,
-    hevcNvenc: false,
-    av1Nvenc: false,
-  },
+  encoders: [
+    {
+      id: "libx264",
+      label: "H.264（libx264，软件）",
+      vendor: "software",
+      codec: "h264",
+      hardware: false,
+      listed: true,
+      usable: true,
+      reason: null,
+    },
+    {
+      id: "libx265",
+      label: "HEVC（libx265，软件）",
+      vendor: "software",
+      codec: "hevc",
+      hardware: false,
+      listed: true,
+      usable: true,
+      reason: null,
+    },
+    {
+      id: "hevc_nvenc",
+      label: "HEVC（hevc_nvenc，NVIDIA）",
+      vendor: "nvidia",
+      codec: "hevc",
+      hardware: true,
+      listed: true,
+      usable: false,
+      reason: "NVIDIA 硬件编码不可用：No capable devices found",
+    },
+  ],
   encoderCount: 10,
   filterCount: 10,
   hasSubtitlesFilter: true,
   hwAccels: [],
+  gpus: [],
   warnings: [],
 };
 
